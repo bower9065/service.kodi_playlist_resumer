@@ -5,7 +5,7 @@ Runs as a service and will periodically update the resume point for an individua
 
 Will automatically resume a video if Kodi was shutdown while playing it. 
 
-Can also auto play random video library item if set to.
+Can also auto play random video library item if there is nothing to resume.
 
 See settings to configure how often the resume point is set, and whether to automatically resume.
  
