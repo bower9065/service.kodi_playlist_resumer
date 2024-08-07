@@ -4,3 +4,5 @@
 - Will automatically resume a video if Kodi was shutdown while playing it. 
 - Can also auto play random video library item if there is nothing to resume.
   - See settings to configure how often the resume point is set, and whether to automatically resume.
+  - Adjustable resume point offset
+  - Adjustable resume delay
