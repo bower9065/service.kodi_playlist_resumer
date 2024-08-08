@@ -11,9 +11,9 @@ Runs as a service and will periodically update the resume point while videos are
     </description>
     <platform>all</platform>
 	  <license>GPL-3.0-only</license>
-    <website>https://github.com/bossanova808/script.service.playbackresumer</website>
-    <source>https://github.com/bossanova808/script.service.playbackresumer</source>
-    <forum>https://forum.kodi.tv/showthread.php?tid=355383</forum>
+    <website></website>
+    <source>https://github.com/bower9065/service.kodi_playlist_resumer/tree/main</source>
+    <forum></forum>
     <email></email>
 	<assets>
 		<icon>resources/icon.png</icon>
