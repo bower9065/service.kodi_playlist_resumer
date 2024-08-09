@@ -102,30 +102,11 @@ class KodiPlayer(xbmc.Player):
             log(f"No/invalid library id ({Store.library_id}) for {Store.currently_playing_file_path}")
             return
 
-        # if current time < Kodi's ignoresecondsatstart setting, save as 0 seconds
-        if 0 < seconds < Store.ignore_seconds_at_start:
-            log(f'Not updating resume point as current time ({seconds}) is below Kodi\'s ignoresecondsatstart'
-                f' setting of {Store.ignore_seconds_at_start}')
-            seconds = 0
-            with open(Store.file_to_store_resume_point, 'w') as f:
-                f.write(str(seconds))
-                
         # User stopped video, reset kodi's resume point and remove our resume point
         if seconds == -2:
             log("Not updating Kodi native resume point because the file was stopped normally, so Kodi should do it itself")
-            seconds = 0
-            with open(Store.file_to_store_resume_point, 'w') as f:
-                f.write('')
+            Store.clear_old_play_details()
 
-        # if current time > Kodi's ignorepercentatend setting, save resume point
-        percent_played = int((seconds * 100) / Store.length_of_currently_playing_file)
-        if percent_played > (100 - Store.ignore_percent_at_end):
-            log(f'Not updating resume point as current percent played ({percent_played}) is above Kodi\'s ignorepercentatend'
-                f' setting of {Store.ignore_percent_at_end}')
-            seconds = 0
-            with open(Store.file_to_store_resume_point, 'w') as f:
-                f.write(str(seconds))
-                    
         # if file ended wait to see if kodi is shutting down or is playing another video
         if seconds == -1:
 
@@ -136,29 +117,35 @@ class KodiPlayer(xbmc.Player):
                 if Store.kodi_event_monitor.abortRequested():
                     log("Kodi is shutting down, and will save resume point")
                     # Kodi is shutting down while playing a video.
-                    seconds = int(self.getTime())
+                    seconds = int(self.getTime())                   
                     break
 
                 if self.isPlaying():
-                    # a new video has started playing. Kodi is not actually shutting down
-                    seconds = 0
-                    with open(Store.file_to_store_resume_point, 'w') as f:
-                        f.write('')                    
-                    break
+                    # a new video has started playing. Kodi is not actually shutting down                   
+                    return
+                xbmc.sleep(100) 
 
-                xbmc.sleep(100)
- 
-        # if still -1 than video ended, reset kodi's resume point and remove our resume point
-        if seconds == -1:
-            # zero indicates to JSON-RPC to remove the resume point
+        # if current time < Kodi's ignoresecondsatstart setting, save as 0 seconds
+        if 0 < seconds < Store.ignore_seconds_at_start:
+            log(f'Not updating resume point as current time ({seconds}) is below Kodi\'s ignoresecondsatstart'
+                f' setting of {Store.ignore_seconds_at_start}')
             seconds = 0
             with open(Store.file_to_store_resume_point, 'w') as f:
-                f.write('')
- 
+                f.write(str(seconds))
+
+        # if current time > Kodi's ignorepercentatend setting, save resume point
+        percent_played = int((seconds * 100) / Store.length_of_currently_playing_file)
+        if percent_played > (100 - Store.ignore_percent_at_end):
+            log(f'Not updating resume point as current percent played ({percent_played}) is above Kodi\'s ignorepercentatend'
+                f' setting of {Store.ignore_percent_at_end}')
+            seconds = 0
+            with open(Store.file_to_store_resume_point, 'w') as f:
+                f.write(str(seconds))
+
         # if seconds between start ignore and end ignore, save resume point
         if percent_played < (100 - Store.ignore_percent_at_end) and seconds > Store.ignore_seconds_at_start :
             with open(Store.file_to_store_resume_point, 'w') as f:
-                f.write(str(seconds))                              
+                f.write(str(seconds))                             
 
         # First update the resume point in the tracker file for later retrieval if needed
         log(f'Setting custom resume seconds to {seconds}')
