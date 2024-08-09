@@ -5,7 +5,7 @@
 			<group id="1">
 				<setting help="" id="saveintervalsecs" label="32001" type="integer">
 					<level>0</level>
-					<default>20</default>
+					<default>10</default>
 					<constraints>
 						<minimum>5</minimum>
 						<maximum>600</maximum>
@@ -16,7 +16,7 @@
 				</setting>
 				<setting help="" id="resumeonstartup" label="32002" type="boolean">
 					<level>0</level>
-					<default>false</default>
+					<default>true</default>
 					<control type="toggle"/>
 				</setting>
 				<setting help="" id="autoplayrandom" label="32003" type="boolean">
@@ -26,7 +26,7 @@
 				</setting>
                <setting help="" id="playbackdelay" label="32004" type="integer">
                     <level>0</level>
-                    <default>5</default>
+                    <default>7</default>
                     <constraints>
                         <minimum>0</minimum>
                         <step>1</step>
