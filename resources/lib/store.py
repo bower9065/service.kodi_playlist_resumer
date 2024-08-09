@@ -94,7 +94,10 @@ class Store:
             f.write('')
         with open(Store.file_to_store_resume_point, 'w+') as f:
             f.write('')
-
+        with open(Store.file_to_store_playlist_shuffled, 'w+') as f:
+            f.write('')
+        with open(Store.file_to_store_playlist_position, 'w+') as f:
+            f.write('')            
     @staticmethod
     def load_config_from_settings():
         """
