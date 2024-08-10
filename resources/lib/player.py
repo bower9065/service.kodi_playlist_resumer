@@ -102,17 +102,12 @@ class KodiPlayer(xbmc.Player):
             log(f"No/invalid library id ({Store.library_id}) for {Store.currently_playing_file_path}")
             return
 
-        # User stopped video, reset kodi's resume point and remove our resume point
-        if seconds == -2:
-            log("Not updating Kodi native resume point because the file was stopped normally, so Kodi should do it itself")
-            Store.clear_old_play_details()
-
         # if file ended wait to see if kodi is shutting down or is playing another video
-        if seconds == -1:
+        if seconds < 0:
 
             # check if Kodi is actually shutting down
             # (abortRequested happens slightly after onPlayBackStopped, hence the sleep/wait/check)
-            for i in range(0, 30):
+            for i in range(0, 100):
 
                 if Store.kodi_event_monitor.abortRequested():
                     log("Kodi is shutting down, and will save resume point")
@@ -124,6 +119,12 @@ class KodiPlayer(xbmc.Player):
                     # a new video has started playing. Kodi is not actually shutting down                   
                     return
                 xbmc.sleep(100) 
+
+        # User stopped video, reset kodi's resume point and remove our resume point
+        if seconds < 0:
+            log("Not updating Kodi native resume point because the file was stopped normally, so Kodi should do it itself")
+            Store.clear_old_play_details()
+            return
 
         # if current time < Kodi's ignoresecondsatstart setting, save as 0 seconds
         if 0 < seconds < Store.ignore_seconds_at_start:
