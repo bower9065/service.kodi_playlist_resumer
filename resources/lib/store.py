@@ -232,8 +232,12 @@ class Store:
                     final_shuffled = json_response_shuffled['result']['shuffled']
                     with open(Store.file_to_store_playlist_shuffled, 'w+', encoding='utf8') as f:
                         f.write(str(final_shuffled)) 
-                    with open(Store.file_to_store_playlist_position, 'w+', encoding='utf8') as f:
-                        f.write(str(final_position))                 
+                    if int(final_position) < 0:
+                        with open(Store.file_to_store_playlist_position, 'w+', encoding='utf8') as f:
+                            f.write(str(0))
+                    else:  
+                        with open(Store.file_to_store_playlist_position, 'w+', encoding='utf8') as f:
+                            f.write(str(final_position))                 
                     filtered = []
                     for type in json_response_items['result']['items']:
                         if type["type"] == "movie":
