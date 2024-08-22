@@ -25,6 +25,12 @@ class KodiPlayer(xbmc.Player):
     def onPlayBackEnded(self):  # video ended normally (user didn't stop it)
         log("onPlayBackEnded")
         self.update_resume_point(-1)
+        # fix for Kodi wasnt playing next items in playlist after being shutdown by Android TV    
+        video_playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)        
+        log('Playback has ended but items are still in playlist. Resuming play...')
+        if not self.isPlayingVideo() and video_playlist.size() > 0:
+            self.resume_if_was_playing()   
+            return
         self.autoplay_random_if_enabled()
 
     def onPlayBackStopped(self):  # user stopped
