@@ -29,7 +29,7 @@ class KodiPlayer(xbmc.Player):
         video_playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)        
         log('Playback has ended but items are still in playlist. Resuming play...')
         if not self.isPlayingVideo() and video_playlist.size() > 0:
-            self.resume_if_was_playing()   
+            xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"playlistid":1,"position":0}},"id":"player_open"}')
             return
         self.autoplay_random_if_enabled()
 
