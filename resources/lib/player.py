@@ -23,6 +23,7 @@ class KodiPlayer(xbmc.Player):
         log(f'Playback paused at: {Store.paused_time}')
 
     def onPlayBackEnded(self):  # video ended normally (user didn't stop it)
+#        xbmc.log('-------------------------------------------------------------ended--------------- )', xbmc.LOGINFO)
         log("onPlayBackEnded")
         self.update_resume_point(-1)
         # fix for Kodi wasnt playing next items in playlist after being shutdown by Android TV    
@@ -33,7 +34,8 @@ class KodiPlayer(xbmc.Player):
             return
         self.autoplay_random_if_enabled()
 
-    def onPlayBackStopped(self):  # user stopped
+    def onPlayBackStopped(self):  # user stopped / shutdown
+#        xbmc.log('------------------------------------------------------------stopped--------------- )', xbmc.LOGINFO)
         log("onPlayBackStopped")
         self.update_resume_point(-2)
 
@@ -108,13 +110,10 @@ class KodiPlayer(xbmc.Player):
             log(f"No/invalid library id ({Store.library_id}) for {Store.currently_playing_file_path}")
             return
 
-        # if file ended wait to see if kodi is shutting down or is playing another video
-        if seconds < 0:
-
-            # check if Kodi is actually shutting down
-            # (abortRequested happens slightly after onPlayBackStopped, hence the sleep/wait/check)
+        # wait to see if video stopped for kodi shutdown or was stopped by user
+        if seconds == -2:
+            # check if Kodi is actually shutting down (abortRequested happens slightly after onPlayBackStopped, hence the sleep/wait/check)
             for i in range(0, 100):
-
                 if Store.kodi_event_monitor.abortRequested():
                     log("Kodi is shutting down, and will save resume point")
                     # Kodi is shutting down while playing a video.
@@ -126,11 +125,16 @@ class KodiPlayer(xbmc.Player):
                     return
                 xbmc.sleep(100) 
 
-        # User stopped video, reset kodi's resume point and remove our resume point
-        if seconds < 0:
-            log("Not updating Kodi native resume point because the file was stopped normally, so Kodi should do it itself")
+        # at this point user stopped video, clear our resume point (Kodi will save its resume point on its own)
+        if seconds == -2:
+            log("Video was stopped by user, and will remove our resume point")                  
             Store.clear_old_play_details()
             return
+            
+        # file ended normally, reset kodi's resume point and save our resume point
+        if seconds == -1:
+            log("Removing resume points because the file has ended normally")
+            seconds = 0
 
         # if current time < Kodi's ignoresecondsatstart setting, save as 0 seconds
         if 0 < seconds < Store.ignore_seconds_at_start:
