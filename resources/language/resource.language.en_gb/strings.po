@@ -42,6 +42,9 @@ msgctxt "#32003"
 msgid "Auto-Play a random video if nothing is playing"
 msgstr ""
 
+msgctxt "#32006"
+msgid "Resume even if stopped"
+msgstr ""
 
 msgctxt "#32030"
 msgid "Exclude"

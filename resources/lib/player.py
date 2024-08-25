@@ -125,20 +125,29 @@ class KodiPlayer(xbmc.Player):
                     return
                 xbmc.sleep(100) 
 
-        # at this point user stopped video, clear our resume point (Kodi will save its resume point on its own)
+        # at this point user stopped video, clear our resume point (Kodi should save its resume point on its own)
         if seconds == -2:
             log("Video was stopped by user, and will remove our resume point")                  
-            Store.clear_old_play_details()
+            if get_setting_as_bool("resumeifstopped"):
+                seconds = int(self.getTime())
+            else:
+                Store.clear_old_play_details()
             return
             
         # file ended normally, reset kodi's resume point and save our resume point
         if seconds == -1:
             log("Removing resume points because the file has ended normally")
-            seconds = 0
-
+            if get_setting_as_bool("resumeifstopped"):
+                seconds = 0
+            else:
+                Store.clear_old_play_details()
+                seconds = 0
+            # fix for kodi was overwriting native resume point with old reume point after video ended, causing a loop
+            xbmc.sleep(3000)
+            
         # if current time < Kodi's ignoresecondsatstart setting, save as 0 seconds
         if 0 < seconds < Store.ignore_seconds_at_start:
-            log(f'Not updating resume point as current time ({seconds}) is below Kodi\'s ignoresecondsatstart'
+            log(f'Resume point ({seconds}) is below Kodi\'s ignoresecondsatstart'
                 f' setting of {Store.ignore_seconds_at_start}')
             seconds = 0
             with open(Store.file_to_store_resume_point, 'w') as f:
@@ -147,7 +156,7 @@ class KodiPlayer(xbmc.Player):
         # if current time > Kodi's ignorepercentatend setting, save resume point
         percent_played = int((seconds * 100) / Store.length_of_currently_playing_file)
         if percent_played > (100 - Store.ignore_percent_at_end):
-            log(f'Not updating resume point as current percent played ({percent_played}) is above Kodi\'s ignorepercentatend'
+            log(f'Resume point as current percent played ({percent_played}) is above Kodi\'s ignorepercentatend'
                 f' setting of {Store.ignore_percent_at_end}')
             seconds = 0
             with open(Store.file_to_store_resume_point, 'w') as f:

@@ -3,6 +3,24 @@
 	<section id="service.kodi_playlist_resumer">
 		<category help="" id="resumer" label="32000">
 			<group id="1">
+				<setting help="" id="resumeonstartup" label="32002" type="boolean">
+					<level>0</level>
+					<default>true</default>
+					<control type="toggle"/>
+				</setting>
+				<setting help="" id="resumeifstopped" label="32006" type="boolean">
+					<level>0</level>
+					<default>true</default>
+					<control type="toggle"/>
+					<dependencies>
+						<dependency type="enable">
+							<condition operator="is" setting="resumeonstartup">true</condition>
+						</dependency>
+						<dependency type="visible">
+							<condition operator="is" setting="resumeonstartup">true</condition>
+						</dependency>
+					</dependencies>
+				</setting>				
 				<setting help="" id="saveintervalsecs" label="32001" type="integer">
 					<level>0</level>
 					<default>10</default>
@@ -13,16 +31,14 @@
 					<control format="integer" type="slider">
 						<popup>false</popup>
 					</control>
-				</setting>
-				<setting help="" id="resumeonstartup" label="32002" type="boolean">
-					<level>0</level>
-					<default>true</default>
-					<control type="toggle"/>
-				</setting>
-				<setting help="" id="autoplayrandom" label="32003" type="boolean">
-					<level>0</level>
-					<default>false</default>
-					<control type="toggle"/>
+					<dependencies>
+						<dependency type="enable">
+							<condition operator="is" setting="resumeonstartup">true</condition>
+						</dependency>
+						<dependency type="visible">
+							<condition operator="is" setting="resumeonstartup">true</condition>
+						</dependency>
+					</dependencies>					
 				</setting>
                <setting help="" id="playbackdelay" label="32004" type="integer">
                     <level>0</level>
@@ -35,7 +51,15 @@
 					<control type="slider" format="integer">
                         <popup>false</popup>
                     </control>
-                </setting>
+					<dependencies>
+						<dependency type="enable">
+							<condition operator="is" setting="resumeonstartup">true</condition>
+						</dependency>
+						<dependency type="visible">
+							<condition operator="is" setting="resumeonstartup">true</condition>
+						</dependency>
+					</dependencies>					
+                </setting>	
                <setting help="" id="resumeoffset" label="32005" type="integer">
                     <level>0</level>
                     <default>5</default>
@@ -47,7 +71,20 @@
 					<control type="slider" format="integer">
                         <popup>false</popup>
                     </control>
+					<dependencies>
+						<dependency type="enable">
+							<condition operator="is" setting="resumeonstartup">true</condition>
+						</dependency>
+						<dependency type="visible">
+							<condition operator="is" setting="resumeonstartup">true</condition>
+						</dependency>
+					</dependencies>					
                 </setting>				
+				<setting help="" id="autoplayrandom" label="32003" type="boolean">
+					<level>0</level>
+					<default>false</default>
+					<control type="toggle"/>
+				</setting>				
 			</group>
 		</category>
 		<category help="" id="exclude" label="32030">
