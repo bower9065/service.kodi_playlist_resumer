@@ -27,12 +27,16 @@ class KodiPlayer(xbmc.Player):
         log("onPlayBackEnded")
         self.update_resume_point(-1)
         # fix for Kodi wasnt playing next items in playlist after being shutdown by Android TV    
-        video_playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)        
-        log('Playback has ended but items are still in playlist. Resuming play...')
-        if not self.isPlayingVideo() and video_playlist.size() > 0:
-            xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"playlistid":1,"position":0}},"id":"player_open"}')
-            return
-        self.autoplay_random_if_enabled()
+        xbmc.sleep(int(Store.idle_delay) * 1000)
+        exit_loop = False
+        while not self.isPlaying() and not Store.kodi_event_monitor.abortRequested() and exit_loop == False:
+            for i in range(0, 300): 
+                if xbmc.getGlobalIdleTime() >= int(Store.idle_delay): #xbmc.getCondVisibility("System.IdleTime('Store.idle_delay')"):    
+                    self.autoplay_random_if_enabled()
+                    exit_loop = True
+                    break
+                    #xbmc.sleep(1000)
+                xbmc.sleep(1000)
 
     def onPlayBackStopped(self):  # user stopped / shutdown
 #        xbmc.log('------------------------------------------------------------stopped--------------- )', xbmc.LOGINFO)
@@ -128,7 +132,7 @@ class KodiPlayer(xbmc.Player):
         # at this point user stopped video, clear our resume point (Kodi should save its resume point on its own)
         if seconds == -2:
             log("Video was stopped by user, and will remove our resume point")                  
-            if get_setting_as_bool("resumeifstopped"):
+            if Store.resume_if_stopped:
                 seconds = int(self.getTime())
             else:
                 Store.clear_old_play_details()
@@ -137,13 +141,14 @@ class KodiPlayer(xbmc.Player):
         # file ended normally, reset kodi's resume point and save our resume point
         if seconds == -1:
             log("Removing resume points because the file has ended normally")
-            if get_setting_as_bool("resumeifstopped"):
-                seconds = 0
-            else:
-                Store.clear_old_play_details()
-                seconds = 0
+#            if Store.resume_if_stopped:
+#                seconds = 0
+#            else:
+            Store.clear_old_play_details()
+            return 
+            #seconds = 0
             # fix for kodi was overwriting native resume point with old reume point after video ended, causing a loop
-            xbmc.sleep(3000)
+#            xbmc.sleep(3000)
             
         # if current time < Kodi's ignoresecondsatstart setting, save as 0 seconds
         if 0 < seconds < Store.ignore_seconds_at_start:
@@ -251,73 +256,77 @@ class KodiPlayer(xbmc.Player):
         :return:
         """
         # adjustable playback start delay        
-        xbmc.sleep((int(get_setting('playbackdelay')))*1000)
-        if Store.resume_on_startup \
-                and os.path.exists(Store.file_to_store_resume_point) \
-                and os.path.exists(Store.file_to_store_playlist_items) \
-                and not self.isPlayingVideo() and not Store.kodi_event_monitor.abortRequested():
-            # check how many items are in playlist
-            with open(Store.file_to_store_playlist_items, 'r',) as f:
-                items = f.read()
-            with open(Store.file_to_store_resume_point, 'r') as f:
-                try:
-                    resume_point = float(f.read())
-                except Exception as e:
-                    log("Error reading resume point from file, therefore not resuming.")
-                    return
-            # if playlist has no library items use filepath method                
-            if "movieid" not in items \
-                and "episodeid" not in items\
-                and "musicvideoid" not in items:
-                # neg 1 means the video wasn't playing when Kodi ended
-                if resume_point == '':
-                    log("Not resuming playback because nothing was playing when Kodi last closed")
-                    return False
+        xbmc.sleep(int(Store.playback_delay) * 1000)
+        exit_loop = False
+        while not self.isPlaying() and not Store.kodi_event_monitor.abortRequested() and exit_loop == False:
+            for i in range(0, 300): 
+                if xbmc.getGlobalIdleTime() >= int(Store.idle_delay):                             
+                    if Store.resume_on_startup \
+                            and os.path.exists(Store.file_to_store_resume_point) \
+                            and os.path.exists(Store.file_to_store_playlist_items) \
+                            and not self.isPlayingVideo() and not Store.kodi_event_monitor.abortRequested():
+                        # check how many items are in playlist
+                        with open(Store.file_to_store_playlist_items, 'r',) as f:
+                            items = f.read()
+                        with open(Store.file_to_store_resume_point, 'r') as f:
+                            try:
+                                resume_point = float(f.read())
+                            except Exception as e:
+                                log("Error reading resume point from file, therefore not resuming.")
+                                return
+                        # if playlist has no library items use filepath method                
+                        if "movieid" not in items \
+                            and "episodeid" not in items\
+                            and "musicvideoid" not in items:
+                            # neg 1 means the video wasn't playing when Kodi ended
+                            if resume_point == '':
+                                log("Not resuming playback because nothing was playing when Kodi last closed")
+                                return False
 
-                with open(Store.file_to_store_playlist_items, 'r') as f:
-                    full_path = f.read()
+                            with open(Store.file_to_store_playlist_items, 'r') as f:
+                                full_path = f.read()
 
-                str_timestamp = '%d:%02d' % (resume_point / 60, resume_point % 60)
-                log(f'Will resume playback at {str_timestamp} of {full_path}')
+                            str_timestamp = '%d:%02d' % (resume_point / 60, resume_point % 60)
+                            log(f'Will resume playback at {str_timestamp} of {full_path}')
 
-                self.play(full_path)
-            # if playlist has library items use playlist method                 
-            else:
-                with open(Store.file_to_store_playlist_shuffled, 'r',) as f:
-                    shuffled = f.read()
-                with open(Store.file_to_store_playlist_items, 'r',) as f:
-                    items = f.read()
-                # if playlist is shuffled turn off shuffle until playlist is added
-                if shuffled == "True":
-                    xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.SetShuffle","params":{"playerid":1,"shuffle":false},"id":"player_shuffle"}')
-                with open(Store.file_to_store_playlist_position, 'r',) as f:
-                    position = f.read()            
-                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Add","params":{"item":' + items + ',"playlistid":1},"id":"playlist_add"}')
-                xbmc.sleep(100)       
-                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"playlistid":1,"position":' + position + '}},"id":"player_open"}')
-                # if playlist was shuffled turn on shuffle after playlist is added
-                if shuffled == "True":
-                    xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.SetShuffle","params":{"playerid":1,"shuffle":true},"id":"player_shuffle"}') 
-                str_timestamp = '%d:%02d' % (resume_point / 60, resume_point % 60)
-                log(f'Will resume playback at {str_timestamp} of playlist')
+                            self.play(full_path)
+                        # if playlist has library items use playlist method                 
+                        else:
+                            with open(Store.file_to_store_playlist_shuffled, 'r',) as f:
+                                shuffled = f.read()
+                            with open(Store.file_to_store_playlist_items, 'r',) as f:
+                                items = f.read()
+                            # if playlist is shuffled turn off shuffle until playlist is added
+                            if shuffled == "True":
+                                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.SetShuffle","params":{"playerid":1,"shuffle":false},"id":"player_shuffle"}')
+                            with open(Store.file_to_store_playlist_position, 'r',) as f:
+                                position = f.read()            
+                            xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Add","params":{"item":' + items + ',"playlistid":1},"id":"playlist_add"}')
+                            xbmc.sleep(100)       
+                            xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"playlistid":1,"position":' + position + '}},"id":"player_open"}')
+                            # if playlist was shuffled turn on shuffle after playlist is added
+                            if shuffled == "True":
+                                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.SetShuffle","params":{"playerid":1,"shuffle":true},"id":"player_shuffle"}') 
+                            str_timestamp = '%d:%02d' % (resume_point / 60, resume_point % 60)
+                            log(f'Will resume playback at {str_timestamp} of playlist')
 
-            # wait up to 10 secs for the video to start playing before we try to seek
-            for i in range(0, 1000):
-                if not self.isPlayingVideo() and not Store.kodi_event_monitor.abortRequested():
-                    xbmc.sleep(100)
-                else:
-                    notify(f'Resuming playback at {str_timestamp}', xbmcgui.NOTIFICATION_INFO)
-                    # adjustable resume point offset
-                    offset = resume_point - int(get_setting('resumeoffset'))
-                    if offset > 0:
-                        self.seekTime(offset)
-                        return True
-                    else:
-                        self.seekTime(resume_point)
-                        return True                    
-
-        return False
-
+                        # wait up to 10 secs for the video to start playing before we try to seek
+                        for i in range(0, 1000):
+                            if not self.isPlayingVideo() and not Store.kodi_event_monitor.abortRequested():
+                                xbmc.sleep(100)
+                            else:
+                                notify(f'Resuming playback at {str_timestamp}', xbmcgui.NOTIFICATION_INFO)
+                                # adjustable resume point offset
+                                offset = resume_point - int(Store.resume_offset)
+                                if offset > 0:
+                                    self.seekTime(offset)
+                                    return True
+                                else:
+                                    self.seekTime(resume_point)
+                                    return True                    
+                    exit_loop = True #return False
+                    break
+                xbmc.sleep(1000)
     def get_random_library_video(self):
         """
         Get a random video from the library for playback
@@ -334,15 +343,23 @@ class KodiPlayer(xbmc.Player):
 
         random_int = randint(0, 2)
         if random_int == 0:
-            result_type = 'episodes'
-            method = "GetEpisodes"
+            if get_setting_as_bool("randomtv"):
+                result_type = 'episodes'
+                method = "GetEpisodes"
+            else:
+                return self.get_random_library_video()
         elif random_int == 1:
-            result_type = 'movies'
-            method = "GetMovies"
+            if get_setting_as_bool("randommovies"):
+                result_type = 'movies'
+                method = "GetMovies"
+            else:
+                return self.get_random_library_video()            
         elif random_int == 2:
-            result_type = 'musicvideos'
-            method = "GetMusicVideos"
-
+            if get_setting_as_bool("randommusicvideos"):
+                result_type = 'musicvideos'
+                method = "GetMusicVideos"
+            else:
+                return self.get_random_library_video() 
         # if the randomly chosen type is not in the library, keep randomly trying until we get
         # a type that is in the library...
         if not Store.video_types_in_library[result_type]:

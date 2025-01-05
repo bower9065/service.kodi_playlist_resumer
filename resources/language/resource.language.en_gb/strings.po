@@ -31,7 +31,7 @@ msgid "Resumer"
 msgstr ""
 
 msgctxt "#32001"
-msgid "Save resume point every X seconds"
+msgid " ∟Save resume point every X seconds"
 msgstr ""
 
 msgctxt "#32002"
@@ -43,7 +43,11 @@ msgid "Auto-Play a random video if nothing is playing"
 msgstr ""
 
 msgctxt "#32006"
-msgid "Resume even if stopped"
+msgid " ∟Resume even if stopped"
+msgstr ""
+
+msgctxt "#32007"
+msgid "Idle time before playing video (secs)"
 msgstr ""
 
 msgctxt "#32030"
@@ -67,9 +71,21 @@ msgid "Folder's path (and subfolders)"
 msgstr ""
 
 msgctxt "#32004"
-msgid "Delay start of playback seconds"
+msgid " ∟Delay start of playback seconds"
 msgstr ""
 
 msgctxt "#32005"
-msgid "Resume point offset seconds"
+msgid " ∟Resume point offset seconds"
+msgstr ""
+
+msgctxt "#32008"
+msgid " ∟Include Movies"
+msgstr ""
+
+msgctxt "#32009"
+msgid " ∟Include TV Shows"
+msgstr ""
+
+msgctxt "#32010"
+msgid " ∟Include Music Videos"
 msgstr ""

@@ -10,7 +10,7 @@
 				</setting>
 				<setting help="" id="resumeifstopped" label="32006" type="boolean">
 					<level>0</level>
-					<default>true</default>
+					<default>false</default>
 					<control type="toggle"/>
 					<dependencies>
 						<dependency type="enable">
@@ -79,12 +79,77 @@
 							<condition operator="is" setting="resumeonstartup">true</condition>
 						</dependency>
 					</dependencies>					
-                </setting>				
+                </setting>	
+               <setting help="" id="idledelay" label="32007" type="integer">
+                    <level>0</level>
+                    <default>60</default>
+                    <constraints>
+                        <minimum>5</minimum>
+                        <step>1</step>
+                        <maximum>300</maximum>
+                    </constraints>
+					<control type="slider" format="integer">
+                        <popup>false</popup>
+                    </control>
+					<dependencies>
+						<dependency type="enable">
+							<or>
+								<condition operator="is" setting="autoplayrandom">true</condition>
+								<condition operator="is" setting="resumeonstartup">true</condition>
+							</or>						
+						</dependency>
+						<dependency type="visible">
+							<or>
+								<condition operator="is" setting="autoplayrandom">true</condition>
+								<condition operator="is" setting="resumeonstartup">true</condition>
+							</or>	
+						</dependency>
+					</dependencies>					
+                </setting>					
 				<setting help="" id="autoplayrandom" label="32003" type="boolean">
 					<level>0</level>
 					<default>false</default>
 					<control type="toggle"/>
-				</setting>				
+				</setting>	
+				<setting help="" id="randommovies" label="32008" type="boolean">
+					<level>0</level>
+					<default>true</default>
+					<control type="toggle"/>
+					<dependencies>
+						<dependency type="enable">
+							<condition operator="is" setting="autoplayrandom">true</condition>
+						</dependency>
+						<dependency type="visible">
+							<condition operator="is" setting="autoplayrandom">true</condition>
+						</dependency>
+					</dependencies>
+				</setting>		
+				<setting help="" id="randomtv" label="32009" type="boolean">
+					<level>0</level>
+					<default>false</default>
+					<control type="toggle"/>
+					<dependencies>
+						<dependency type="enable">
+							<condition operator="is" setting="autoplayrandom">true</condition>
+						</dependency>
+						<dependency type="visible">
+							<condition operator="is" setting="autoplayrandom">true</condition>
+						</dependency>
+					</dependencies>
+				</setting>		
+				<setting help="" id="randommusicvideos" label="32010" type="boolean">
+					<level>0</level>
+					<default>false</default>
+					<control type="toggle"/>
+					<dependencies>
+						<dependency type="enable">
+							<condition operator="is" setting="autoplayrandom">true</condition>
+						</dependency>
+						<dependency type="visible">
+							<condition operator="is" setting="autoplayrandom">true</condition>
+						</dependency>
+					</dependencies>
+				</setting>						
 			</group>
 		</category>
 		<category help="" id="exclude" label="32030">

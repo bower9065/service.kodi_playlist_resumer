@@ -109,6 +109,12 @@ class Store:
         Store.save_interval_seconds = int(float(ADDON.getSetting("saveintervalsecs")))
         Store.resume_on_startup = get_setting_as_bool("resumeonstartup")
         Store.autoplay_random = get_setting_as_bool("autoplayrandom")
+        
+        Store.idle_delay = get_setting('idledelay')
+        Store.resume_if_stopped = get_setting_as_bool("resumeifstopped")
+        Store.playback_delay = get_setting('playbackdelay')
+        Store.resume_offset = get_setting('resumeoffset')
+        
         Store.log_configuration()
 
     @staticmethod
