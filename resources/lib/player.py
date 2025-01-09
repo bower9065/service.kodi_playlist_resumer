@@ -373,7 +373,7 @@ class KodiPlayer(xbmc.Player):
             "method": "VideoLibrary." + method,
             "params": {
                 "limits": {
-                    "end": 1
+                    "end": 100
                 },
                 "sort": {
                     "method": "random"
@@ -389,9 +389,37 @@ class KodiPlayer(xbmc.Player):
         log(f'JSON-RPC VideoLibrary.{method} response: {json.dumps(json_response)}')
 
         # found a video!
+        random_list = []
         if json_response['result']['limits']['total'] > 0:
             Store.video_types_in_library[result_type] = True
-            return json_response['result'][result_type][0]['file']
+            if method == "GetMovies":
+                video_list = json_response['result']['movies']
+                for item in video_list:
+                    str1 = '{"movieid":'
+                    str2 = str(item["movieid"])
+                    str3 = "}"
+                    str4 = "".join((str1, str2, str3))                    
+                    random_list.append(str4)
+            if method == "GetEpisodes":
+                video_list = json_response['result']['episodes']
+                for item in video_list:
+                    str1 = '{"episodeid":'
+                    str2 = str(item["episodeid"])
+                    str3 = "}"
+                    str4 = "".join((str1, str2, str3))                    
+                    random_list.append(str4)  
+            if method == "GetMusicVideos":
+                video_list = json_response['result']['musicvideos']
+                for item in video_list:
+                    str1 = '{"musicvideoid":'
+                    str2 = str(item["musicvideoid"])
+                    str3 = "}"
+                    str4 = "".join((str1, str2, str3))                    
+                    random_list.append(str4)                    
+            random_list = str(random_list)
+            random_list = random_list.replace("'", "")
+#            xbmc.log('------------------------('f'{random_list})', xbmc.LOGINFO)
+            return random_list#json_response['result'][result_type][0]['file']
         # no videos of this type
         else:
             log("There are no " + result_type + " in the library")
@@ -405,18 +433,25 @@ class KodiPlayer(xbmc.Player):
         """
 
         if Store.autoplay_random:
-
             log("Autoplay random is enabled in addon settings, so will play a new random video now.")
-
             video_playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
-
             # make sure the current playlist has finished completely
             if not self.isPlayingVideo() \
                     and (video_playlist.getposition() == -1 or video_playlist.getposition() == video_playlist.size()):
+
+                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Add","params":{"item":' + self.get_random_library_video() + ',"playlistid":1},"id":"playlist_add"}')
+                xbmc.sleep(100)       
+                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"playlistid":1,"position":0}},"id":"player_open"}')
+
+
                 full_path = self.get_random_library_video()
                 log("Auto-playing next random video because nothing is playing and playlist is empty: " + full_path)
-                self.play(full_path)
-                notify(f'Auto-playing random video: {full_path}', xbmcgui.NOTIFICATION_INFO)
+            if "episode" in full_path: 
+                notify(f'Auto-playing random Episodes', xbmcgui.NOTIFICATION_INFO)            
+            elif "movie" in full_path: 
+                notify(f'Auto-playing random Movies', xbmcgui.NOTIFICATION_INFO)
+            elif "musicvideo" in full_path: 
+                notify(f'Auto-playing random Music Videos', xbmcgui.NOTIFICATION_INFO)                
             else:
                 log(f'Not auto-playing random as playlist not empty or something is playing.')
                 log(f'Current playlist position: {video_playlist.getposition()}, playlist size: {video_playlist.size()}')
