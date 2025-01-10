@@ -136,6 +136,7 @@ class KodiPlayer(xbmc.Player):
                 seconds = int(self.getTime())
             else:
                 Store.clear_old_play_details()
+                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Clear","params":{"playlistid":1},"id":"playlist_clear"}')
             return
             
         # file ended normally, reset kodi's resume point and save our resume point
@@ -418,7 +419,6 @@ class KodiPlayer(xbmc.Player):
                     random_list.append(str4)                    
             random_list = str(random_list)
             random_list = random_list.replace("'", "")
-#            xbmc.log('------------------------('f'{random_list})', xbmc.LOGINFO)
             return random_list#json_response['result'][result_type][0]['file']
         # no videos of this type
         else:
@@ -438,12 +438,10 @@ class KodiPlayer(xbmc.Player):
             # make sure the current playlist has finished completely
             if not self.isPlayingVideo() \
                     and (video_playlist.getposition() == -1 or video_playlist.getposition() == video_playlist.size()):
-
+                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Clear","params":{"playlistid":1},"id":"playlist_clear"}')
                 xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Add","params":{"item":' + self.get_random_library_video() + ',"playlistid":1},"id":"playlist_add"}')
                 xbmc.sleep(100)       
                 xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"playlistid":1,"position":0}},"id":"player_open"}')
-
-
                 full_path = self.get_random_library_video()
                 log("Auto-playing next random video because nothing is playing and playlist is empty: " + full_path)
             if "episode" in full_path: 
