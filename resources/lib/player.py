@@ -240,7 +240,7 @@ class KodiPlayer(xbmc.Player):
         :return:
         """
         # adjustable playback start delay
-        if os.path.exists(Store.file_to_store_playlist_items):
+        if os.path.exists(Store.file_to_store_playlist_items) and not self.isPlaying():
             with open(Store.file_to_store_playlist_items, 'r',) as f:
                 items = f.read()
             if items != '':
@@ -466,7 +466,7 @@ class KodiPlayer(xbmc.Player):
         Play a random video, if the setting is enabled
         :return:
         """
-        if Store.autoplay_random:   
+        if Store.autoplay_random and not self.isPlaying():   
             xbmc.sleep(int(Store.idle_delay) * 1000)
             exit_loop = False
             while not self.isPlaying() and not Store.kodi_event_monitor.abortRequested() and exit_loop == False:
