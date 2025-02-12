@@ -387,7 +387,7 @@ class KodiPlayer(xbmc.Player):
         # found a video!
 #Ignore smart playlist items        
     #Get list of playlist names       
-        if Addon().getSettingBool("IgnoreSmartPlaylistItems"):  
+        if Addon().getSettingBool("IgnoreSmartPlaylistItems") and os.path.exists("library://video/playlists/"):  
             playlists = []
             ignored_ids = []
             playlist_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Files.GetDirectory","params":{"properties": ["title"],"directory":"library://video/playlists/"}, "id":"get_directory"}')
