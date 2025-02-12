@@ -151,9 +151,19 @@
 					</dependencies>
 				</setting>						
 			</group>
+		</category>		
+		<category help="" id="ContextMenuItem" label="32035">			
+			<group id="1">				
+				<setting help="" id="AddContextMenuItem" label="32036" type="boolean">
+					<level>0</level>
+					<default>true</default>
+					<control type="toggle"/>
+				</setting>
+			</group>								
 		</category>
+		
 		<category help="" id="exclude" label="32030">
-			<group id="1">
+			<group id="1" label="32000">
 				<setting help="" id="ExcludeLiveTV" label="32031" type="boolean">
 					<level>0</level>
 					<default>false</default>
@@ -261,6 +271,13 @@
 						<heading>32034</heading>
 					</control>
 				</setting>
+			</group>
+			<group id="2" label="32100">
+				<setting help="" id="IgnoreSmartPlaylistItems" label="32037" type="boolean">
+					<level>0</level>
+					<default>true</default>
+					<control type="toggle"/>
+				</setting>			
 			</group>
 		</category>
 	</section>

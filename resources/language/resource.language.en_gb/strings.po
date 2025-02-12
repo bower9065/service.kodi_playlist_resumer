@@ -89,3 +89,18 @@ msgstr ""
 msgctxt "#32010"
 msgid " ∟Include Music Videos"
 msgstr ""
+
+msgctxt "#32100"
+msgid "Play random"
+msgstr ""
+
+msgctxt "#32035"
+msgid "Context Menu"
+
+msgctxt "#32036"
+msgid "Add (Play Random) to Context Menu"
+msgstr ""
+
+msgctxt "#32037"
+msgid "Exclude items that are associated with smart playlists"
+msgstr ""

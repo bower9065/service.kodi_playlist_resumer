@@ -16,6 +16,7 @@ def run():
     Store.kodi_event_monitor = KodiEventMonitor(xbmc.Monitor)
     Store.kodi_player = KodiPlayer(xbmc.Player)
 
+    xbmc.sleep(int(Store.playback_delay) * 1000)
     resumed_playback = Store.kodi_player.resume_if_was_playing()
     if not resumed_playback and not Store.kodi_player.isPlayingVideo():
         Store.kodi_player.autoplay_random_if_enabled()
@@ -26,6 +27,3 @@ def run():
             break
 
     footprints(False)
-
-
-
