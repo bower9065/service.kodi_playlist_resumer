@@ -4,6 +4,7 @@ from urllib.parse import parse_qs
 import json
 from xbmcaddon import Addon
 import os
+import xbmcvfs
 
 if __name__ == '__main__':
     path = sys.listitem.getPath()
@@ -34,7 +35,7 @@ if __name__ == '__main__':
             xsp = ''
 #Ignore smart playlist items 
     #Get list of playlist names       
-        if Addon().getSettingBool("IgnoreSmartPlaylistItems") and os.path.exists("library://video/playlists/") and os.path.exists("library://video/playlists/"):  
+        if Addon().getSettingBool("IgnoreSmartPlaylistItems") and os.path.exists(xbmcvfs.translatePath("special://userdata/library/video/playlists/")):
             playlists = []
             ignored_ids = []
             playlist_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Files.GetDirectory","params":{"properties": ["title"],"directory":"library://video/playlists/"}, "id":"get_directory"}')

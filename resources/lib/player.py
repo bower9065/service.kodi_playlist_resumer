@@ -309,7 +309,6 @@ class KodiPlayer(xbmc.Player):
                         if not self.isPlayingVideo() and not Store.kodi_event_monitor.abortRequested():
                             xbmc.sleep(100)
                         else:
-                            notify(f'Resuming playback at {str_timestamp}', xbmcgui.NOTIFICATION_INFO)
                             # adjustable resume point offset
                             offset = resume_point - int(Store.resume_offset)
                             if offset > 0:
@@ -387,7 +386,7 @@ class KodiPlayer(xbmc.Player):
         # found a video!
 #Ignore smart playlist items        
     #Get list of playlist names       
-        if Addon().getSettingBool("IgnoreSmartPlaylistItems") and os.path.exists("library://video/playlists/"):  
+        if Addon().getSettingBool("IgnoreSmartPlaylistItems") and os.path.exists(xbmcvfs.translatePath("special://userdata/library/video/playlists/")):
             playlists = []
             ignored_ids = []
             playlist_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Files.GetDirectory","params":{"properties": ["title"],"directory":"library://video/playlists/"}, "id":"get_directory"}')
