@@ -40,11 +40,11 @@
 						</dependency>
 					</dependencies>					
 				</setting>
-               <setting help="" id="playbackdelay" label="32004" type="integer">
+               <setting help="" id="resume_delay" label="32004" type="integer">
                     <level>0</level>
-                    <default>7</default>
+                    <default>12</default>
                     <constraints>
-                        <minimum>0</minimum>
+                        <minimum>7</minimum>
                         <step>1</step>
                         <maximum>60</maximum>
                     </constraints>
@@ -79,8 +79,13 @@
 							<condition operator="is" setting="resumeonstartup">true</condition>
 						</dependency>
 					</dependencies>					
-                </setting>	
-               <setting help="" id="idledelay" label="32007" type="integer">
+                </setting>						
+				<setting help="" id="autoplayrandom" label="32003" type="boolean">
+					<level>0</level>
+					<default>false</default>
+					<control type="toggle"/>
+				</setting>
+               <setting help="" id="random_delay" label="32007" type="integer">
                     <level>0</level>
                     <default>60</default>
                     <constraints>
@@ -93,24 +98,13 @@
                     </control>
 					<dependencies>
 						<dependency type="enable">
-							<or>
-								<condition operator="is" setting="autoplayrandom">true</condition>
-								<condition operator="is" setting="resumeonstartup">true</condition>
-							</or>						
+							<condition operator="is" setting="autoplayrandom">true</condition>
 						</dependency>
 						<dependency type="visible">
-							<or>
-								<condition operator="is" setting="autoplayrandom">true</condition>
-								<condition operator="is" setting="resumeonstartup">true</condition>
-							</or>	
+							<condition operator="is" setting="autoplayrandom">true</condition>
 						</dependency>
-					</dependencies>					
-                </setting>					
-				<setting help="" id="autoplayrandom" label="32003" type="boolean">
-					<level>0</level>
-					<default>false</default>
-					<control type="toggle"/>
-				</setting>	
+					</dependencies>				
+                </setting>				
 				<setting help="" id="randommovies" label="32008" type="boolean">
 					<level>0</level>
 					<default>true</default>

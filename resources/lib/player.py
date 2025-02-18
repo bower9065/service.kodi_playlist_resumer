@@ -240,29 +240,23 @@ class KodiPlayer(xbmc.Player):
         :return:
         """
         # adjustable playback start delay
-        if os.path.exists(Store.file_to_store_playlist_items) and not self.isPlaying():
+        if Store.resume_on_startup \
+                and os.path.exists(Store.file_to_store_resume_point) \
+                and os.path.exists(Store.file_to_store_playlist_items) \
+                and os.path.exists(Store.file_to_store_playlist_shuffled) \
+                and os.path.exists(Store.file_to_store_playlist_position) \
+                and not self.isPlayingVideo() and not Store.kodi_event_monitor.abortRequested():
+                
             with open(Store.file_to_store_playlist_items, 'r',) as f:
                 items = f.read()
             if items != '':
-                exit_loop = False
-                while not self.isPlaying() and not Store.kodi_event_monitor.abortRequested() and exit_loop == False:
-                    for i in range(0, 300):            
-                        if xbmc.getGlobalIdleTime() >= (int(Store.idle_delay) - 4):
-                            notify(f'Preparing to resume playback...', xbmcgui.NOTIFICATION_INFO)                    
-                            xbmc.sleep(4000)
-                            if xbmc.getGlobalIdleTime() >= int(Store.idle_delay):                        
-                                exit_loop == True
-                                break
-                        xbmc.sleep(1000)
-                    if exit_loop == False:
-                        break     
+            
+                xbmc.sleep((int(Store.resume_delay) - 4) * 1000)
+                if xbmc.getGlobalIdleTime() >= (int(Store.resume_delay) - 4):
+                    notify(f'Preparing to resume playback...', xbmcgui.NOTIFICATION_INFO)
+                    xbmc.sleep(4000)
+                if xbmc.getGlobalIdleTime() >= int(Store.resume_delay):
 
-                if Store.resume_on_startup \
-                        and os.path.exists(Store.file_to_store_resume_point) \
-                        and os.path.exists(Store.file_to_store_playlist_items) \
-                        and os.path.exists(Store.file_to_store_playlist_shuffled) \
-                        and os.path.exists(Store.file_to_store_playlist_position) \
-                        and not self.isPlayingVideo() and not Store.kodi_event_monitor.abortRequested():
                     xbmc.executebuiltin('ActivateWindow(busydialognocancel)')
                     # check how many items are in playlist
                     with open(Store.file_to_store_playlist_items, 'r',) as f:
@@ -317,7 +311,8 @@ class KodiPlayer(xbmc.Player):
                             else:
                                 self.seekTime(resume_point)
                                 return True 
-                xbmc.sleep(1000)
+                else:
+                    return True                   
             else:
                 return False
         else:
@@ -465,33 +460,28 @@ class KodiPlayer(xbmc.Player):
         Play a random video, if the setting is enabled
         :return:
         """
-        if Store.autoplay_random and not self.isPlaying():   
-            xbmc.sleep(int(Store.idle_delay) * 1000)
-            exit_loop = False
-            while not self.isPlaying() and not Store.kodi_event_monitor.abortRequested() and exit_loop == False:
-                for i in range(0, 300):            
-                    if xbmc.getGlobalIdleTime() >= (int(Store.idle_delay) - 4):
-                        notify(f'Preparing to play random videos...', xbmcgui.NOTIFICATION_INFO)                    
-                        xbmc.sleep(4000)
-                        if xbmc.getGlobalIdleTime() >= int(Store.idle_delay):                        
-                            exit_loop == True
-                            break
-                    xbmc.sleep(1000)
-                if exit_loop == False:
-                    break        
-            log("Autoplay random is enabled in addon settings, so will play a new random video now.")
-            video_playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
-            # make sure the current playlist has finished completely
-            if not self.isPlaying() \
-                    and (video_playlist.getposition() == -1 or video_playlist.getposition() == video_playlist.size()):
-                full_path = self.get_random_library_video()
-                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Clear","params":{"playlistid":1},"id":"playlist_clear"}')
-                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Add","params":{"item":' + full_path + ',"playlistid":1},"id":"playlist_add"}')
-                xbmc.sleep(100)       
-                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"playlistid":1,"position":0}},"id":"player_open"}')
-                log("Auto-playing next random video because nothing is playing and playlist is empty: " + full_path)                
-            else:
-                log(f'Not auto-playing random as playlist not empty or something is playing.')
-                log(f'Current playlist position: {video_playlist.getposition()}, playlist size: {video_playlist.size()}')
-            xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
+        if Store.autoplay_random and not self.isPlaying():
+
+
+            xbmc.sleep((int(Store.random_delay) - 4) * 1000)
+            if xbmc.getGlobalIdleTime() >= (int(Store.random_delay) - 4):
+                notify(f'Preparing to play random videos...', xbmcgui.NOTIFICATION_INFO)
+                xbmc.sleep(4000)
+            if xbmc.getGlobalIdleTime() >= int(Store.random_delay):
+        
+                log("Autoplay random is enabled in addon settings, so will play a new random video now.")
+                video_playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
+                # make sure the current playlist has finished completely
+                if not self.isPlaying() \
+                        and (video_playlist.getposition() == -1 or video_playlist.getposition() == video_playlist.size()):
+                    full_path = self.get_random_library_video()
+                    xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Clear","params":{"playlistid":1},"id":"playlist_clear"}')
+                    xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Add","params":{"item":' + full_path + ',"playlistid":1},"id":"playlist_add"}')
+                    xbmc.sleep(100)       
+                    xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"playlistid":1,"position":0}},"id":"player_open"}')
+                    log("Auto-playing next random video because nothing is playing and playlist is empty: " + full_path)                
+                else:
+                    log(f'Not auto-playing random as playlist not empty or something is playing.')
+                    log(f'Current playlist position: {video_playlist.getposition()}, playlist size: {video_playlist.size()}')
+                xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
 

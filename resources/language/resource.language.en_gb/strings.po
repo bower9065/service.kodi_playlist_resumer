@@ -47,7 +47,7 @@ msgid " ∟Resume even if stopped"
 msgstr ""
 
 msgctxt "#32007"
-msgid "Idle time before playing video (secs)"
+msgid " ∟Delay auto play random seconds"
 msgstr ""
 
 msgctxt "#32030"
@@ -71,7 +71,7 @@ msgid "Folder's path (and subfolders)"
 msgstr ""
 
 msgctxt "#32004"
-msgid " ∟Delay start of playback seconds"
+msgid " ∟Delay resume on start seconds"
 msgstr ""
 
 msgctxt "#32005"
