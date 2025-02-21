@@ -32,6 +32,7 @@ if __name__ == '__main__':
             has_xsp = False if any(x in str(xsp) for x in ignored_rules) else True 
         else:
             has_xsp = False
+        if has_xsp == False:
             xsp = ''
 #Ignore smart playlist items 
     #Get list of playlist names       
