@@ -51,14 +51,11 @@ class KodiPlayer(xbmc.Player):
 
     def onAVStarted(self):
         log("onAVStarted")
-
         # Clean up - get rid of any data about any files previously played
         Store.clear_old_play_details()
-
         if not self.isPlayingVideo():
             log("Not playing a video - skipping: " + self.getPlayingFile())
             return
-
         xbmc.sleep(1500)  # give it a bit to start playing and let the stopped method finish
         Store.update_current_playing_file_path(self.getPlayingFile())
         Store.length_of_currently_playing_file = self.getTotalTime()
@@ -67,12 +64,11 @@ class KodiPlayer(xbmc.Player):
         except RuntimeError:
             log('Could not get current playback time from player')
         while self.isPlaying() and not Store.kodi_event_monitor.abortRequested():
-
-            try:
-                self.update_resume_point(self.getTime())
-            except RuntimeError:
-                log('Could not get current playback time from player')
-
+            if not xbmc.getCondVisibility('Player.Paused'):
+                try:
+                    self.update_resume_point(self.getTime())
+                except RuntimeError:
+                    log('Could not get current playback time from player')
             for i in range(0, Store.save_interval_seconds):
                 # Shutting down or not playing video anymore...stop handling playback
                 if Store.kodi_event_monitor.abortRequested() or not self.isPlaying():
