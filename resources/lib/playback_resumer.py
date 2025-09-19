@@ -11,9 +11,8 @@ def run():
     :return:
     """
     footprints()
-    # load settings and create the store for our globals
     config = Store()
-    Store.kodi_event_monitor = KodiEventMonitor(xbmc.Monitor)
+    Store.kodi_event_monitor = KodiEventMonitor()
     Store.kodi_player = KodiPlayer(xbmc.Player)
 
     resumed_playback = Store.kodi_player.resume_if_was_playing()
@@ -22,7 +21,6 @@ def run():
 
     while not Store.kodi_event_monitor.abortRequested():
         if Store.kodi_event_monitor.waitForAbort(1):
-            # Abort was requested while waiting. We should exit
             break
 
     footprints(False)

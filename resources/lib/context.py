@@ -1,226 +1,162 @@
 import sys
 import xbmc
-from urllib.parse import parse_qs
 import json
-from xbmcaddon import Addon
 import os
 import xbmcvfs
+from urllib.parse import parse_qs
+from xbmcaddon import Addon
 
-if __name__ == '__main__':
+
+def build_jsonrpc(method, params=None, rpc_id="1"):
+    """Helper to build JSON-RPC requests."""
+    return json.dumps({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params or {},
+        "id": rpc_id
+    })
+
+
+def safe_execute(query):
+    """Executes a JSON-RPC query and returns parsed JSON result."""
+    response = xbmc.executeJSONRPC(query)
+    try:
+        return json.loads(response)
+    except json.JSONDecodeError:
+        xbmc.log(f"JSON decode error for query: {query}", xbmc.LOGERROR)
+        return {}
+
+
+def collect_ignored_ids():
+    """Return a set of (type, id) for items inside smart playlists."""
+    ignored = set()
+    if not Addon().getSettingBool("IgnoreSmartPlaylistItems"):
+        return ignored
+
+    playlist_dir = xbmcvfs.translatePath("special://userdata/library/video/playlists/")
+    if not os.path.exists(playlist_dir):
+        return ignored
+
+    query = build_jsonrpc("Files.GetDirectory", {"properties": ["title"], "directory": "library://video/playlists/"})
+    result = safe_execute(query).get("result", {}).get("files", [])
+
+    for pl in result:
+        playlist_path = pl["file"]
+        q = build_jsonrpc("Files.GetDirectory", {"properties": ["title"], "directory": playlist_path})
+        items = safe_execute(q).get("result", {}).get("files", [])
+        for item in items:
+            ignored.add((item["type"], item["id"]))
+
+    return ignored
+
+
+def filter_items(items, item_type, ignored_ids, list_item, ignored_collector):
+    """Filter playlist items, excluding ignored ones unless it's the current item."""
+    result = []
+    for it in items:
+        item_id = it[f"{item_type}id"]
+        key = (item_type, item_id)
+        if key not in ignored_ids or list_item == key:
+            result.append({f"{item_type}id": item_id})
+        else:
+            ignored_collector.append(f"{item_type}:{item_id}")
+    return result
+
+
+def fetch_and_filter(method, result_key, item_type, ignored_ids, list_item, ignored_collector, fetch_size=1000, max_keep=100, params_extra=None):
+    """Fetch items, filter them, and return up to `max_keep` valid results."""
+    params = {
+        "limits": {"end": fetch_size},
+        "sort": {"method": "random"},
+        "properties": ["file"]
+    }
+    if params_extra:
+        params.update(params_extra)
+
+    query = build_jsonrpc(method, params)
+    result = safe_execute(query).get("result", {}).get(result_key, [])
+    filtered = filter_items(result, item_type, ignored_ids, list_item, ignored_collector)
+    return filtered[:max_keep]
+
+
+if __name__ == "__main__":
     path = sys.listitem.getPath()
-    dbid = xbmc.getInfoLabel('ListItem.DBID()')
-    tvshow_title = xbmc.getInfoLabel('ListItem.TVShowTitle()')    
-    tvshow_dbid = xbmc.getInfoLabel('ListItem.TvShowDBID()')    
-    tvshow_season = 'Season ' + xbmc.getInfoLabel('ListItem.Season()')
-    db_type = xbmc.getInfoLabel('listitem.DBTYPE()')
-    path_type, db_path = path.split('://', 1)
-    db_path = db_path.split('?', 1)
-    query = parse_qs(db_path[1]) if len(db_path) > 1 else "null"
-    db_path = db_path[0].rstrip('/').split('/')
-    list_item = '"' + db_type + 'id":' + dbid 
-   
-    xbmc.executebuiltin('ActivateWindow(busydialognocancel)')
-  
-#Video Library
-    if path_type == 'videodb':
-        video_list = []    
-        # set library rules
-        if str('query') != "Null" and 'xsp' in query and 'rules' in query['xsp'][0]:              
-            xsp = str((json.loads(query['xsp'][0]))['rules'])
-            xsp = ',"filter":' + xsp.replace("'", '"')         
-            ignored_rules = ['dateadded', 'inprogress', 'numwatched'] 
-            has_xsp = False if any(x in str(xsp) for x in ignored_rules) else True 
-        else:
-            has_xsp = False
-        if has_xsp == False:
-            xsp = ''
-#Ignore smart playlist items 
-    #Get list of playlist names       
-        if Addon().getSettingBool("IgnoreSmartPlaylistItems") and os.path.exists(xbmcvfs.translatePath("special://userdata/library/video/playlists/")):
-            playlists = []
-            ignored_ids = []
-            playlist_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Files.GetDirectory","params":{"properties": ["title"],"directory":"library://video/playlists/"}, "id":"get_directory"}')
-            playlist_list = json.loads(playlist_list)
-            playlist_list = playlist_list['result']['files']
-            for item in playlist_list:
-                final_playlist_list = '"' + str(item["file"]) + '"'                
-                playlists.append(final_playlist_list)         
-    #For items in each playlist
-            for item in playlists:
-                playlist_items = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Files.GetDirectory","params":{"properties": ["title"],"directory":' + item + '}, "id":"get_directory"}')
-                playlist_items = json.loads(playlist_items)
-                playlist_items = playlist_items['result']['files']  
-                playlist_items = json.loads(json.dumps(playlist_items))
-    #Append name for items in each playlist
-                for x, i in enumerate(playlist_items):
-                    itemid = playlist_items[x]['id']
-                    itemtype = playlist_items[x]['type']
-                    final_playlist_items = '"' + str(itemtype) + 'id":' + str(itemid)
-                    ignored_ids.append(final_playlist_items)        
-        else:
-            ignored_ids = []
-    #Movies            
-        if db_type == 'movie':
-            video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetMovies","params":{"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_movie"}')
-            if has_xsp == False:
-                xbmc.log('----(Playlist Resumer)...Playing random movies, NO RULES', xbmc.LOGINFO)
-            else:
-                xbmc.log('----(Playlist Resumer)...Playing random movies, RULES APPLIED', xbmc.LOGINFO)
-    #TVShows
-        if db_type == 'tvshow':
-            #InProgress/RecentlyAdded
-            if len(db_path) <= 2:
-                tvshow_id = db_path[1]
-                video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetEpisodes","params":{"tvshowid":' + tvshow_id + ',"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_tvshow"}')
-                if has_xsp == False:
-                    xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title}, NO RULES', xbmc.LOGINFO)
-                else:
-                    xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title}, RULES APPLIED', xbmc.LOGINFO)
-            #Titles
-            else:
-                tvshow_id = db_path[2]
-                video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetEpisodes","params":{"tvshowid":' + tvshow_id + ',"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_tvshow"}')
-                if has_xsp == False:
-                    xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title}, NO RULES', xbmc.LOGINFO)
-                else:
-                    xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title}, RULES APPLIED', xbmc.LOGINFO)
-    #Seasons
-        if db_type == 'season':
-            #InProgress/RecentlyAdded
-            if len(db_path)  <= 3:
-                tvshow_id = db_path[1]
-                season_id = db_path[2]
-                #Has valid season id
-                if int(season_id) > -1:
-                    video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetEpisodes","params":{"tvshowid":' + tvshow_id + ',"season":' + season_id + ',"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_season"}')
-                    if has_xsp == False:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title} 'f'{tvshow_season}, NO RULES', xbmc.LOGINFO)
-                    else:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title} 'f'{tvshow_season}, RULES APPLIED', xbmc.LOGINFO)
-                else: 
-                    video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetEpisodes","params":{"tvshowid":' + tvshow_id + ',"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_tvshow"}')
-                    if has_xsp == False:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title} All Seasons, NO RULES', xbmc.LOGINFO)
-                    else:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title} All Seasons, RULES APPLIED', xbmc.LOGINFO)
-            #Titles
-            else: 
-                tvshow_id = db_path[2]
-                season_id = db_path[3]
-                #Has valid season id
-                if int(season_id) > -1:
-                    video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetEpisodes","params":{"tvshowid":' + tvshow_id + ',"season":' + season_id + ',"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_season"}')
-                    if has_xsp == False:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title} 'f'{tvshow_season}, NO RULES', xbmc.LOGINFO)                                 
-                    else:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title} 'f'{tvshow_season}, RULES APPLIED', xbmc.LOGINFO)
-                        
-                else: 
-                    video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetEpisodes","params":{"tvshowid":' + tvshow_id + ',"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_tvshow"}')
-                    if has_xsp == False:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title} All Seasons, NO RULES', xbmc.LOGINFO)
-                    else: 
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title} All Seasons, RULES APPLIED', xbmc.LOGINFO)
-    #Episodes
-        if db_type == 'episode':
-            #InProgress/RecentlyAdded
-            if len(db_path)  <= 4:
-                tvshow_id = db_path[1]
-                season_id = db_path[2]
-                #Has valid season id
-                if int(season_id) > -1:
-                    video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetEpisodes","params":{"tvshowid":' + tvshow_id + ',"season":' + season_id + ',"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_season"}') 
-                    if has_xsp == False:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title} 'f'{tvshow_season}, NO RULES', xbmc.LOGINFO)                                 
+    dbid = xbmc.getInfoLabel("ListItem.DBID()")
+    db_type = xbmc.getInfoLabel("ListItem.DBTYPE()")
+    tvshow_title = xbmc.getInfoLabel("ListItem.TVShowTitle()")
+    tvshow_dbid = xbmc.getInfoLabel("ListItem.TvShowDBID()")
+    tvshow_season = "Season " + xbmc.getInfoLabel("ListItem.Season()")
 
-                else: 
-                    video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetEpisodes","params":{"tvshowid":' + tvshow_id + ',"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_tvshow"}') 
-                    if has_xsp == False:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title}, NO RULES', xbmc.LOGINFO)                                 
-            #Titles
-            else: 
-                tvshow_id = db_path[2]
-                season_id = db_path[3]
-                #Has valid show id
-                if int(season_id) > -1:
-                    video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetEpisodes","params":{"tvshowid":' + tvshow_id + ',"season":' + season_id + ',"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_season"}') 
-                    if has_xsp == False:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title} 'f'{tvshow_season}, NO RULES', xbmc.LOGINFO)
-                    else:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title} 'f'{tvshow_season}, RULES APPLIED', xbmc.LOGINFO)
-                #Has valid season id
-                elif int(tvshow_id) == -1:
-                    tvshow_id = tvshow_dbid
-                    video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetEpisodes","params":{"tvshowid":' + tvshow_id + ',"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_season"}')                       
-                    if has_xsp == False:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title}, NO RULES', xbmc.LOGINFO)                          
-                    else:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title}, RULES APPLIED', xbmc.LOGINFO)       
-                else: 
-                    video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetEpisodes","params":{"tvshowid":' + tvshow_id + ',"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_tvshow"}')
-                    if has_xsp == False:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title}, NO RULES', xbmc.LOGINFO)                                 
-                    else:
-                        xbmc.log('----(Playlist Resumer)...Playing random episodes from 'f'{tvshow_title}, RULES APPLIED', xbmc.LOGINFO)
-    #Music Videos            
-        if db_type == 'musicvideo':
-            video_list = xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"VideoLibrary.GetMusicVideos","params":{"limits":{"end":100},"sort":{"method":"random"},"properties":["file"]' + xsp + '},"id":"get_random_music_video"}')
-            if has_xsp == False:
-                xbmc.log('----(Playlist Resumer)...Playing random music videos, NO RULES', xbmc.LOGINFO)
-            else:
-                xbmc.log('----(Playlist Resumer)...Playing random music videos, RULES APPLIED', xbmc.LOGINFO)        
-#Add and play items
-        json_response = json.loads(video_list)
-        random_list = []
-    #Movies
-        if db_type == "movie":
-            id_list = json_response['result']['movies']
-            for item in id_list:
-                str1 = '{"movieid":'
-                str2 = str(item["movieid"])
-                str3 = "}"
-                str4 = "".join((str1, str2, str3))                    
-                str5 = str4.replace("{", "").replace("}", "")
-                if str5 not in str(ignored_ids) or list_item in str(ignored_ids):
-                    random_list.append(str4)
-                else:
-                    xbmc.log('----(Playlist Resumer)...IGNORING VIDEO'f'{str4}', xbmc.LOGINFO)
-    #TVShows, Seasons, Episodes            
-        if db_type in ('episode', 'season', 'tvshow'):
-            video_list = json_response['result']['episodes']
-            for item in video_list:
-                str1 = '{"episodeid":'
-                str2 = str(item["episodeid"])
-                str3 = "}"
-                str4 = "".join((str1, str2, str3))
-                str5 = str4.replace("{", "").replace("}", "")
-                if str5 not in str(ignored_ids) or list_item in str(ignored_ids):
-                    random_list.append(str4)
-                else:
-                    xbmc.log('----(Playlist Resumer)...IGNORING VIDEO'f'{str4}', xbmc.LOGINFO)
-    #Music Videos
-        if db_type == "musicvideo":
-            video_list = json_response['result']['musicvideos']
-            for item in video_list:
-                str1 = '{"musicvideoid":'
-                str2 = str(item["musicvideoid"])
-                str3 = "}"
-                str4 = "".join((str1, str2, str3))                    
-                random_list.append(str4)
-                str5 = str4.replace("{", "").replace("}", "")
-                if str5 not in str(ignored_ids) or list_item in str(ignored_ids):
-                    random_list.append(str4)
-                else:
-                    xbmc.log('----(Playlist Resumer)...IGNORING VIDEO'f'{str4}', xbmc.LOGINFO)                
-        random_list = str(random_list)
-        random_list = random_list.replace("'", "")
-            
-        xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Clear","params":{"playlistid":1},"id":"playlist_clear"}')
-        xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Add","params":{"item":' + random_list + ',"playlistid":1},"id":"playlist_add"}')
-        xbmc.sleep(100)       
-        xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"playlistid":1,"position":0}},"id":"player_open"}')             
-#Playlists
-    elif path_type == 'library':
-        xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"recursive":true, "directory":"' + path + '"},"options":{"shuffled":true}},"id":"play_playlist"}')
-        xbmc.log('----(Playlist Resumer)...Playing random videos from 'f'{db_path[2]}', xbmc.LOGINFO)
-    xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
+    path_type, db_path = path.split("://", 1)
+    db_path = db_path.split("?", 1)
+    query = parse_qs(db_path[1]) if len(db_path) > 1 else None
+    db_path = db_path[0].rstrip("/").split("/")
+
+    list_item = (db_type, int(dbid)) if dbid.isdigit() else None
+
+    xbmc.executebuiltin("ActivateWindow(busydialognocancel)")
+
+    try:
+        if path_type == "videodb":
+            ignored_ids = collect_ignored_ids()
+            ignored_collector = []
+            playlist_items = []
+
+            if db_type == "movie":
+                playlist_items = fetch_and_filter(
+                    "VideoLibrary.GetMovies", "movies", "movie",
+                    ignored_ids, list_item, ignored_collector
+                )
+
+            elif db_type == "episode":
+                playlist_items = fetch_and_filter(
+                    "VideoLibrary.GetEpisodes", "episodes", "episode",
+                    ignored_ids, list_item, ignored_collector,
+                    params_extra={"tvshowid": int(tvshow_dbid)} if tvshow_dbid.isdigit() else None
+                )
+
+            elif db_type == "musicvideo":
+                playlist_items = fetch_and_filter(
+                    "VideoLibrary.GetMusicVideos", "musicvideos", "musicvideo",
+                    ignored_ids, list_item, ignored_collector
+                )
+
+            elif db_type == "tvshow":
+                playlist_items = fetch_and_filter(
+                    "VideoLibrary.GetEpisodes", "episodes", "episode",
+                    ignored_ids, list_item, ignored_collector,
+                    params_extra={"tvshowid": int(dbid)} if dbid.isdigit() else None
+                )
+
+            elif db_type == "season":
+                playlist_items = fetch_and_filter(
+                    "VideoLibrary.GetEpisodes", "episodes", "episode",
+                    ignored_ids, list_item, ignored_collector,
+                    params_extra={"season": int(xbmc.getInfoLabel('ListItem.Season()')), "tvshowid": int(tvshow_dbid)} if tvshow_dbid.isdigit() else None
+                )
+
+            # Single log line with all ignored items
+            if ignored_collector:
+                xbmc.log("----(Playlist Resumer)...IGNORED VIDEOS " + ", ".join(ignored_collector), xbmc.LOGINFO)
+
+            # Add playlist and play
+            if playlist_items:
+                clear = build_jsonrpc("Playlist.Clear", {"playlistid": 1}, "playlist_clear")
+                add = build_jsonrpc("Playlist.Add", {"playlistid": 1, "item": playlist_items}, "playlist_add")
+                play = build_jsonrpc("Player.Open", {"item": {"playlistid": 1, "position": 0}}, "player_open")
+
+                safe_execute(clear)
+                safe_execute(add)
+                xbmc.sleep(100)
+                safe_execute(play)
+
+        elif path_type == "library":
+            query = build_jsonrpc("Player.Open", {
+                "item": {"recursive": True, "directory": path},
+                "options": {"shuffled": True}
+            }, "play_playlist")
+            safe_execute(query)
+            xbmc.log(f"----(Playlist Resumer)...Playing random videos from {db_path[2]}", xbmc.LOGINFO)
+
+    finally:
+        xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
