@@ -27,6 +27,7 @@ class KodiPlayer(xbmc.Player):
 
     def onPlayBackStopped(self):  # user stopped / shutdown
         log("Attempting onPlayBackStopped")
+        xbmc.sleep(3000)
         if Store.just_woke or Store.just_suspend:
             log(f"Skipping onPlayBackStopped: just_woke={Store.just_woke}, just_suspend={Store.just_suspend}")
             return
@@ -74,7 +75,8 @@ class KodiPlayer(xbmc.Player):
             log("Could not get playing time - seeked past end?")
             self.update_resume_point(0)
             pass
-
+            Store.just_woke = False
+            Store.just_suspend = False
     def onPlayBackSeekChapter(self, chapter):
         log(f'onPlayBackSeekChapter chapter: {chapter}')
         try:
@@ -83,7 +85,8 @@ class KodiPlayer(xbmc.Player):
             log("Could not get playing time - seeked past end?")
             self.update_resume_point(0)
             pass
-
+            Store.just_woke = False
+            Store.just_suspend = False
     def update_resume_point(self, seconds):
         """
         This is where the work is done - stores a new resume point in the Kodi library for the currently playing file
@@ -100,7 +103,7 @@ class KodiPlayer(xbmc.Player):
             log(f"No/invalid library id ({Store.library_id}) for {Store.currently_playing_file_path}")
             return
         if seconds == -2:
-            for i in range(0, 5):
+            for i in range(0, 7):
                 if Store.kodi_event_monitor.abortRequested():
                     log("Kodi is shutting down, and will save resume point")
                     seconds = int(self.getTime())
@@ -256,13 +259,17 @@ class KodiPlayer(xbmc.Player):
                             xbmc.executeJSONRPC(
                                 '{"jsonrpc":"2.0","method":"Player.SetShuffle","params":{"playerid":1,"shuffle":false},"id":"player_shuffle"}'
                             )
+                        else:
+                            log("Playlist was not shuffled")                        
                         xbmc.executeJSONRPC(
                             '{"jsonrpc":"2.0","method":"Playlist.Add","params":{"item":' + items + ',"playlistid":1},"id":"playlist_add"}'
                         )
                         monitor.waitForAbort(1)
+                        log("Playlist restored")
                         xbmc.executeJSONRPC(
                             '{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"playlistid":1,"position":' + position + '}},"id":"player_open"}'
                         )
+                        log("Playlist playing")
                         if shuffled == "True":
                             log("Shuffle turned on")
                             xbmc.executeJSONRPC(
@@ -312,7 +319,7 @@ class KodiPlayer(xbmc.Player):
             "id": "randomLibraryVideo",
             "method": f"VideoLibrary.{method}",
             "params": {
-                "limits": {"end": 100},
+                "limits": {"end": Store.randomitems},
                 "sort": {"method": "random"},
                 "properties": ["file"]
             }

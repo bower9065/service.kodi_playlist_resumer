@@ -95,7 +95,7 @@ msgid "Play random"
 msgstr ""
 
 msgctxt "#32035"
-msgid "Context Menu"
+msgid "Play Random"
 
 msgctxt "#32036"
 msgid "Add (Play Random) to Context Menu"
@@ -104,3 +104,6 @@ msgstr ""
 msgctxt "#32037"
 msgid "Exclude items that are associated with smart playlists"
 msgstr ""
+
+msgctxt "#32038"
+msgid " ∟Number of library items to retrieve"

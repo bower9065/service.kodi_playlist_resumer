@@ -19,12 +19,11 @@ class KodiEventMonitor(xbmc.Monitor):
 
     def onNotification(self, sender, method, data):
         if method in ("System.OnSleep", "System.OnSuspend"):
-            #xbmc.log('----(Playlist Resumer)...Suspend detected.', xbmc.LOGINFO)
             log("Suspend detected")
             Store.just_suspend = True
         elif method in ("System.OnWake", "System.OnResume"):
             Store.kodi_player.stop()
-            #xbmc.log('----(Playlist Resumer)...Wake detected. Attempting resume.', xbmc.LOGINFO)
+            xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Clear","params":{"playlistid":1},"id":"playlist_clear"}')
             log("Wake detected")
             Store.just_woke = True
             resumed_playback = Store.kodi_player.resume_if_was_playing()

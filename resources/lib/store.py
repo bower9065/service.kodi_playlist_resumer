@@ -85,6 +85,7 @@ class Store:
         """
         log("Loading configuration")
         Store.save_interval_seconds = int(float(ADDON.getSetting("saveintervalsecs")))
+        Store.randomitems = int(get_setting("randomitems"))
         Store.resume_on_startup = get_setting_as_bool("resumeonstartup")
         Store.autoplay_random = get_setting_as_bool("autoplayrandom")   
         Store.random_delay = get_setting('random_delay')

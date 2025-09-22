@@ -6,6 +6,8 @@ import xbmcvfs
 from urllib.parse import parse_qs
 from xbmcaddon import Addon
 
+addon = Addon()
+randomitems = addon.getSettingInt("randomitems")
 
 def build_jsonrpc(method, params=None, rpc_id="1"):
     """Helper to build JSON-RPC requests."""
@@ -16,7 +18,6 @@ def build_jsonrpc(method, params=None, rpc_id="1"):
         "id": rpc_id
     })
 
-
 def safe_execute(query):
     """Executes a JSON-RPC query and returns parsed JSON result."""
     response = xbmc.executeJSONRPC(query)
@@ -25,7 +26,6 @@ def safe_execute(query):
     except json.JSONDecodeError:
         xbmc.log(f"JSON decode error for query: {query}", xbmc.LOGERROR)
         return {}
-
 
 def collect_ignored_ids():
     """Return a set of (type, id) for items inside smart playlists."""
@@ -49,7 +49,6 @@ def collect_ignored_ids():
 
     return ignored
 
-
 def filter_items(items, item_type, ignored_ids, list_item, ignored_collector):
     """Filter playlist items, excluding ignored ones unless it's the current item."""
     result = []
@@ -62,22 +61,59 @@ def filter_items(items, item_type, ignored_ids, list_item, ignored_collector):
             ignored_collector.append(f"{item_type}:{item_id}")
     return result
 
+def fetch_and_filter(
+    method,
+    result_key,
+    item_type,
+    ignored_ids,
+    list_item,
+    ignored_collector,
+    fetch_size=None,
+    max_keep=None,
+    params_extra=None
+):
+    """
+    Fetch items from Kodi library using JSON-RPC, filter out ignored items, 
+    and return up to `max_keep` valid results.
 
-def fetch_and_filter(method, result_key, item_type, ignored_ids, list_item, ignored_collector, fetch_size=1000, max_keep=100, params_extra=None):
-    """Fetch items, filter them, and return up to `max_keep` valid results."""
+    :param method: VideoLibrary method to call (e.g., 'GetMovies', 'GetEpisodes')
+    :param result_key: Key in JSON-RPC result ('movies', 'episodes', 'musicvideos')
+    :param item_type: Type of item ('movie', 'episode', 'musicvideo')
+    :param ignored_ids: IDs to exclude
+    :param list_item: Current list item being played (tuple of dbtype and dbid)
+    :param ignored_collector: list to collect ignored items for logging
+    :param fetch_size: number of items to fetch from Kodi (defaults to 2x max_keep)
+    :param max_keep: maximum number of items to return (defaults to Store.randomitems)
+    :param params_extra: dict of extra parameters to pass to JSON-RPC
+    :return: list of filtered items
+    """
+
+    # Use Store.randomitems if max_keep is not specified
+    if max_keep is None:
+        max_keep = randomitems
+
+    # Fetch a little more than we want to keep to allow filtering
+    if fetch_size is None:
+        fetch_size = max_keep * 2
+
     params = {
         "limits": {"end": fetch_size},
         "sort": {"method": "random"},
         "properties": ["file"]
     }
+
     if params_extra:
         params.update(params_extra)
 
+    # Build and execute JSON-RPC
     query = build_jsonrpc(method, params)
     result = safe_execute(query).get("result", {}).get(result_key, [])
-    filtered = filter_items(result, item_type, ignored_ids, list_item, ignored_collector)
-    return filtered[:max_keep]
 
+    # Filter items
+    filtered = filter_items(result, item_type, ignored_ids, list_item, ignored_collector)
+
+    # Return up to max_keep items
+    return filtered[:max_keep]
 
 if __name__ == "__main__":
     path = sys.listitem.getPath()

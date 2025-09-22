@@ -79,12 +79,47 @@
 							<condition operator="is" setting="resumeonstartup">true</condition>
 						</dependency>
 					</dependencies>					
-                </setting>						
+                </setting>
+			</group>
+		</category>		
+		<category help="" id="ContextMenuItem" label="32035">			
+			<group id="1">				
+				<setting help="" id="AddContextMenuItem" label="32036" type="boolean">
+					<level>0</level>
+					<default>true</default>
+					<control type="toggle"/>
+				</setting>			
 				<setting help="" id="autoplayrandom" label="32003" type="boolean">
 					<level>0</level>
 					<default>false</default>
 					<control type="toggle"/>
 				</setting>
+				
+				<setting help="" id="randomitems" label="32038" type="integer">
+					<level>0</level>
+					<default>100</default>
+					<constraints>
+						<minimum>1</minimum>
+						<maximum>10000</maximum>
+					</constraints>
+					<control type="edit" format="integer" />
+					<dependencies>
+						<dependency type="enable">
+							<or>
+								<condition operator="is" setting="autoplayrandom">true</condition>
+								<condition operator="is" setting="AddContextMenuItem">true</condition>
+							</or>
+						</dependency>
+						<dependency type="visible">
+							<or>
+								<condition operator="is" setting="autoplayrandom">true</condition>
+								<condition operator="is" setting="AddContextMenuItem">true</condition>
+							</or>
+						</dependency>
+					</dependencies>
+				</setting>
+
+				
                <setting help="" id="random_delay" label="32007" type="integer">
                     <level>0</level>
                     <default>60</default>
@@ -143,16 +178,8 @@
 							<condition operator="is" setting="autoplayrandom">true</condition>
 						</dependency>
 					</dependencies>
-				</setting>						
-			</group>
-		</category>		
-		<category help="" id="ContextMenuItem" label="32035">			
-			<group id="1">				
-				<setting help="" id="AddContextMenuItem" label="32036" type="boolean">
-					<level>0</level>
-					<default>true</default>
-					<control type="toggle"/>
 				</setting>
+				
 			</group>								
 		</category>
 		
