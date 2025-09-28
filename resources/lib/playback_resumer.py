@@ -16,7 +16,7 @@ def run():
     Store.kodi_player = KodiPlayer(xbmc.Player)
 
     resumed_playback = Store.kodi_player.resume_if_was_playing()
-    if not resumed_playback and not Store.kodi_player.isPlayingVideo():
+    if resumed_playback == False and not Store.kodi_player.isPlayingVideo():
         Store.kodi_player.autoplay_random_if_enabled()
 
     while not Store.kodi_event_monitor.abortRequested():

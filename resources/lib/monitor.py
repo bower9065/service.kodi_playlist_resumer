@@ -27,5 +27,5 @@ class KodiEventMonitor(xbmc.Monitor):
             log("Wake detected")
             Store.just_woke = True
             resumed_playback = Store.kodi_player.resume_if_was_playing()
-            if not resumed_playback:
+            if resumed_playback == False:
                 Store.kodi_player.autoplay_random_if_enabled()
