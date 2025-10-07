@@ -25,7 +25,7 @@ class Store:
     video_types_in_library = {'episodes': True, 'movies': True, 'musicvideos': True}
     file_to_store_playlist_items = ''
     file_to_store_resume_point = ''
-    file_to_store_playlist_shuffled = ''
+#    file_to_store_playlist_shuffled = ''
     file_to_store_playlist_position = ''
     
     def __init__(self):
@@ -37,7 +37,6 @@ class Store:
             os.makedirs(PROFILE)
         Store.file_to_store_playlist_items = os.path.join(PROFILE, "playlist items.txt")
         Store.file_to_store_resume_point = os.path.join(PROFILE, "resume point.txt")
-        Store.file_to_store_playlist_shuffled = os.path.join(PROFILE, "playlist shuffled.txt")
         Store.file_to_store_playlist_position = os.path.join(PROFILE, "playlist position.txt")
         advancedsettings_file = xbmcvfs.translatePath("special://profile/advancedsettings.xml")
         root = None
@@ -72,8 +71,6 @@ class Store:
         with open(Store.file_to_store_playlist_items, 'w+', encoding='utf-8') as f:
             f.write('[]')
         with open(Store.file_to_store_resume_point, 'w+') as f:
-            f.write('')
-        with open(Store.file_to_store_playlist_shuffled, 'w+') as f:
             f.write('')
         with open(Store.file_to_store_playlist_position, 'w+') as f:
             f.write('')            
@@ -178,16 +175,13 @@ class Store:
                 "method": "Player.GetProperties",
                 "params": {
                     "playerid": 1,
-                    "properties": ["position", "shuffled"]
+                    "properties": ["position"]
                 },
                 "id": "player_properties"
             }
             player_props = json.loads(xbmc.executeJSONRPC(json.dumps(player_query)))
             playlist_items = json.loads(xbmc.executeJSONRPC(json.dumps(playlist_query)))
             final_position = max(0, player_props['result']['position'])
-            final_shuffled = player_props['result']['shuffled']
-            with open(Store.file_to_store_playlist_shuffled, 'w', encoding='utf8') as f:
-                f.write(str(final_shuffled))
             with open(Store.file_to_store_playlist_position, 'w', encoding='utf8') as f:
                 f.write(str(final_position))
             filtered = []

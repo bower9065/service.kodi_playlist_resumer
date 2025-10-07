@@ -103,24 +103,18 @@ class KodiPlayer(xbmc.Player):
             log(f"No/invalid library id ({Store.library_id}) for {Store.currently_playing_file_path}")
             return
         if seconds == -2:
-            for i in range(0, 7):
-                if Store.kodi_event_monitor.abortRequested():
-                    log("Kodi is shutting down, and will save resume point")
-                    seconds = int(self.getTime())
-                    break
-                if self.isPlaying():
-                    log("Kodi is playing a video, not shutting down")
+            if not Store.kodi_event_monitor.abortRequested():                         
+                if Store.resume_if_stopped:
+                    log("Video was stopped by user with Resume if Stopped on, and will keep our resume point")   
                     return
-                xbmc.sleep(1000) 
-        if seconds == -2:                          
-            if Store.resume_if_stopped:
-                log("Video was stopped by user with Resume if Stopped on, and will save our resume point")   
-                seconds = int(self.getTime())
+                else:
+                    log("Video was stopped by user with Resume if Stopped off, and will remove our resume point")                  
+                    Store.clear_old_play_details()
+                    xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Clear","params":{"playlistid":1},"id":"playlist_clear"}')
+                    return
             else:
-                log("Video was stopped by user with Resume if Stopped off, and will remove our resume point")                  
-                Store.clear_old_play_details()
-                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Clear","params":{"playlistid":1},"id":"playlist_clear"}')
-            return          
+                log("Video was stopped as a result of Abort Requested, and will keep our resume point")   
+                return      
         if seconds == -1:
             log("Removing resume points because the file has ended normally")
             Store.clear_old_play_details()
@@ -213,99 +207,105 @@ class KodiPlayer(xbmc.Player):
 
     def resume_if_was_playing(self):
         """
-        Automatically resume a video after a crash, if one was playing...
-        :return:
+        Automatically resume a video after a crash, if one was playing.
+        Restores the playlist with the correct starting item first,
+        seeks to resume point, then adds remaining items.
         """
-        if not self.isPlaying():
-            xbmc.log('----(Playlist Resumer)...Resuming playback.', xbmc.LOGINFO)
-            monitor = xbmc.Monitor()
-            if Store.resume_on_startup \
-                    and os.path.exists(Store.file_to_store_resume_point) \
-                    and os.path.exists(Store.file_to_store_playlist_items) \
-                    and os.path.exists(Store.file_to_store_playlist_shuffled) \
-                    and os.path.exists(Store.file_to_store_playlist_position):
-                with open(Store.file_to_store_playlist_items, 'r') as f:
-                    items = f.read()
-                if items != '[]':
-                    if not monitor.waitForAbort(max((int(Store.resume_delay) - 4), 0)):
-                        if xbmc.getGlobalIdleTime() >= (int(Store.resume_delay) - 4):
-                            notify(f'Preparing to resume playback...', xbmcgui.NOTIFICATION_INFO)
-                            log("Notification displayed")
-                            monitor.waitForAbort(4)
-                        else:
-                            notify(f'Resume playback canceled', xbmcgui.NOTIFICATION_INFO)
-                            log("Resume stopped, idle time failed")
-                            return True
-                    if xbmc.getGlobalIdleTime() >= int(Store.resume_delay):
-                        
-                        notify(f'Resuming playback...', xbmcgui.NOTIFICATION_INFO)
-                        log("Resume starting, idle time passed")
-                        xbmc.executebuiltin('ActivateWindow(busydialognocancel)')
-                        with open(Store.file_to_store_resume_point, 'r') as f:
-                            try:
-                                resume_point = float(f.read())
-                            except Exception:
-                                log("Error reading resume point from file, therefore not resuming.")
-                                return False
-                        if "movieid" not in items and "episodeid" not in items and "musicvideoid" not in items:
-                            full_path = items
-                            log("Resuming as filepath method")
-                            self.play(full_path)
-                        else:
-                            log("Resuming as playlist method")
-                            with open(Store.file_to_store_playlist_shuffled, 'r') as f:
-                                shuffled = f.read()
-                            with open(Store.file_to_store_playlist_position, 'r') as f:
-                                position = f.read()
-                            if shuffled == "True":
-                                log("Shuffle turned off")
-                                xbmc.executeJSONRPC(
-                                    '{"jsonrpc":"2.0","method":"Player.SetShuffle","params":{"playerid":1,"shuffle":false},"id":"player_shuffle"}'
-                                )
-                            else:
-                                log("Playlist was not shuffled")                        
-                            xbmc.executeJSONRPC(
-                                '{"jsonrpc":"2.0","method":"Playlist.Add","params":{"item":' + items + ',"playlistid":1},"id":"playlist_add"}'
-                            )
-                            monitor.waitForAbort(1)
-                            log("Playlist restored")
-                            xbmc.executeJSONRPC(
-                                '{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"playlistid":1,"position":' + position + '}},"id":"player_open"}'
-                            )
-                            log("Playlist playing")
-                            if shuffled == "True":
-                                log("Shuffle turned on")
-                                xbmc.executeJSONRPC(
-                                    '{"jsonrpc":"2.0","method":"Player.SetShuffle","params":{"playerid":1,"shuffle":true},"id":"player_shuffle"}'
-                                )
-                        xbmc.executebuiltin('Dialog.Close(busydialognocancel)')                 
-                        waited = 0
-                        while (not self.isPlayingVideo() or self.getTotalTime() == 0) \
-                                and not Store.kodi_event_monitor.abortRequested() \
-                                and waited < 50:
-                            monitor.waitForAbort(0.2)
-                            waited += 1
-                        offset = resume_point - int(Store.resume_offset)
-                        if offset > 0:
-                            self.seekTime(offset)
-                            log("Seeking. Seek offset is > 0")
-                        else:
-                            self.seekTime(resume_point)
-                            log("Seeking. Seek offset is <= 0")
-                        return True
-                    else:
-                        log("Resume stopped, idle time failed")
-                        return True
-                else:
-                    log("Resume stopped, playlist is empty")
-                    return False
-            else:
-                log("Resume stopped, missing files")
-                return False
-        else:
+        if self.isPlaying():
             log("Resume stopped, video is already playing")
             return False
-    def get_random_library_video(self):
+        monitor = xbmc.Monitor()
+        if not (Store.resume_on_startup
+                and os.path.exists(Store.file_to_store_resume_point)
+                and os.path.exists(Store.file_to_store_playlist_items)
+                and os.path.exists(Store.file_to_store_playlist_position)):
+            log("Resume stopped, missing files")
+            return False
+        with open(Store.file_to_store_playlist_items, 'r') as f:
+            items_json = f.read()
+        if items_json == '[]':
+            log("Resume stopped, playlist is empty")
+            return False
+        if not monitor.waitForAbort(max((int(Store.resume_delay) - 4), 0)):
+            if xbmc.getGlobalIdleTime() >= (int(Store.resume_delay) - 4):
+                notify("Preparing to resume playback...", xbmcgui.NOTIFICATION_INFO)
+                log("Notification displayed")
+                monitor.waitForAbort(4)
+            else:
+                notify("Resume playback canceled", xbmcgui.NOTIFICATION_INFO)
+                log("Resume stopped, idle time failed (pre-check)")
+                return True
+        if xbmc.getGlobalIdleTime() < int(Store.resume_delay):
+            log("Resume stopped, idle time failed (final check)")
+            return True
+        notify("Resuming playback...", xbmcgui.NOTIFICATION_INFO)
+        log("Resume starting, idle time passed")
+        xbmc.executebuiltin('ActivateWindow(busydialognocancel)')
+        with open(Store.file_to_store_resume_point, 'r') as f:
+            try:
+                resume_point = float(f.read())
+            except Exception:
+                log("Error reading resume point from file, therefore not resuming.")
+                xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
+                return False
+        if "movieid" not in items_json and "episodeid" not in items_json and "musicvideoid" not in items_json:
+            full_path = items_json
+            log("Resuming as filepath method")
+            self.play(full_path)
+        else:
+            import json
+            items = json.loads(items_json)
+            with open(Store.file_to_store_playlist_position, 'r') as f:
+                position = int(f.read())
+            current_item = items[position]
+            remaining_items = items[position+1:] + items[:position]
+            xbmc.executeJSONRPC(
+                '{"jsonrpc":"2.0","method":"Playlist.Clear","params":{"playlistid":1},"id":"playlist_clear"}'
+            )
+            xbmc.executeJSONRPC(json.dumps({
+                "jsonrpc": "2.0",
+                "method": "Playlist.Add",
+                "params": {"playlistid": 1, "item": current_item},
+                "id": "playlist_add_current"
+            }))
+            monitor.waitForAbort(1)
+            xbmc.executeJSONRPC(json.dumps({
+                "jsonrpc": "2.0",
+                "method": "Player.Open",
+                "params": {"item": {"playlistid": 1, "position": 0}},
+                "id": "player_open"
+            }))
+            log("Playlist playing from stored position")
+            waited = 0
+            while (not self.isPlayingVideo() or self.getTotalTime() == 0) \
+                    and not Store.kodi_event_monitor.abortRequested() \
+                    and waited < 50:
+                monitor.waitForAbort(0.2)
+                waited += 1
+            offset = resume_point - int(Store.resume_offset)
+            if offset > 0:
+                self.seekTime(offset)
+                log("Seeking. Seek offset is > 0")
+            else:
+                self.seekTime(resume_point)
+                log("Seeking. Seek offset is <= 0")
+            for item in remaining_items:
+                xbmc.executeJSONRPC(json.dumps({
+                    "jsonrpc": "2.0",
+                    "method": "Playlist.Add",
+                    "params": {"playlistid": 1, "item": item},
+                    "id": "playlist_add_rest"
+                }))
+            log("Remaining playlist items added")
+        xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
+        return True
+
+    def get_random_library_video(self, first_only=False):
+        """
+        Get random videos from the library.
+        If first_only=True, fetch only 1 item for immediate playback.
+        Otherwise, fetch multiple items for the rest of the playlist.
+        """
         xbmc.executebuiltin('ActivateWindow(busydialognocancel)')
         enabled_types = []
         if get_setting_as_bool("randomtv") and Store.video_types_in_library.get("episodes"):
@@ -316,15 +316,16 @@ class KodiPlayer(xbmc.Player):
             enabled_types.append(("musicvideos", "GetMusicVideos"))
         if not enabled_types:
             log("No enabled video types in library. Cannot autoplay random video.")
-            return
+            return []
         result_type, method = enabled_types[randint(0, len(enabled_types)-1)]
         log(f'Getting a random video from: {result_type}')
+        limit_count = 1 if first_only else Store.randomitems
         query = {
             "jsonrpc": "2.0",
             "id": "randomLibraryVideo",
             "method": f"VideoLibrary.{method}",
             "params": {
-                "limits": {"end": Store.randomitems},
+                "limits": {"end": limit_count},
                 "sort": {"method": "random"},
                 "properties": ["file"]
             }
@@ -362,40 +363,59 @@ class KodiPlayer(xbmc.Player):
         if not random_list:
             log(f"All {result_type} are ignored. Trying another type...")
             Store.video_types_in_library[result_type] = False
-            return self.get_random_library_video()
-        return json.dumps(random_list)
+            return self.get_random_library_video(first_only)
+        return random_list
 
     def autoplay_random_if_enabled(self):
         """
-        Play a random video, if the setting is enabled
-        :return:
+        Play a random video if enabled, fetching one first for immediate playback,
+        then fetching the rest to append to the playlist.
         """
-        if Store.autoplay_random:
-            if not self.isPlaying():
-                xbmc.log('----(Playlist Resumer)...Playing random videos.', xbmc.LOGINFO)
-                xbmc.sleep((int(Store.random_delay) - 4) * 1000)
-                if xbmc.getGlobalIdleTime() >= (int(Store.random_delay) - 4):
-                    notify(f'Preparing to play random videos...', xbmcgui.NOTIFICATION_INFO)
-                    xbmc.sleep(4000)
-                if xbmc.getGlobalIdleTime() >= int(Store.random_delay):
-                    notify(f'Playing random videos...', xbmcgui.NOTIFICATION_INFO)
-                    log("Auto Play Random starting, idle time passed")
-                    video_playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
-                    if not self.isPlaying() \
-                            and (video_playlist.getposition() == -1 or video_playlist.getposition() == video_playlist.size()):
-                        full_path = self.get_random_library_video()
-                        xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Clear","params":{"playlistid":1},"id":"playlist_clear"}')
-                        xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Add","params":{"item":' + full_path + ',"playlistid":1},"id":"playlist_add"}')
-                        xbmc.sleep(100)       
-                        xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Open","params":{"item":{"playlistid":1,"position":0}},"id":"player_open"}')
-                        log("Auto-playing next random video because nothing is playing and playlist is empty: " + full_path)                
-                    else:
-                        log(f'Auto Play Random stopped, playlist not empty or something is playing.')
-                    xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
-                else:
-                    notify(f'Play random videos canceled', xbmcgui.NOTIFICATION_INFO)
-                    log("Auto Play Random stopped, idle time failed")
-            else:
-                log("Auto Play Random stopped,  video is already playing. ")
-        else:
-            log("Auto Play Random stopped,  turned off. ")
+        if not Store.autoplay_random:
+            log("Auto Play Random stopped, turned off.")
+            return
+        if self.isPlaying():
+            log("Auto Play Random stopped, video is already playing.")
+            return
+        xbmc.log('----(Playlist Resumer)...Playing random videos.', xbmc.LOGINFO)
+        xbmc.sleep((int(Store.random_delay) - 4) * 1000)
+
+        if xbmc.getGlobalIdleTime() >= (int(Store.random_delay) - 4):
+            notify('Preparing to play random videos...', xbmcgui.NOTIFICATION_INFO)
+            xbmc.sleep(4000)
+        if xbmc.getGlobalIdleTime() < int(Store.random_delay):
+            notify('Play random videos canceled', xbmcgui.NOTIFICATION_INFO)
+            log("Auto Play Random stopped, idle time failed.")
+            return
+        notify('Playing random videos...', xbmcgui.NOTIFICATION_INFO)
+        log("Auto Play Random starting, idle time passed")
+        first_item = self.get_random_library_video(first_only=True)
+        xbmc.executeJSONRPC(json.dumps({
+            "jsonrpc": "2.0",
+            "method": "Playlist.Clear",
+            "params": {"playlistid": 1},
+            "id": "playlist_clear"
+        }))
+        xbmc.executeJSONRPC(json.dumps({
+            "jsonrpc": "2.0",
+            "method": "Playlist.Add",
+            "params": {"playlistid": 1, "item": first_item},
+            "id": "playlist_add_first"
+        }))
+        xbmc.sleep(100)
+        xbmc.executeJSONRPC(json.dumps({
+            "jsonrpc": "2.0",
+            "method": "Player.Open",
+            "params": {"item": {"playlistid": 1, "position": 0}},
+            "id": "player_open"
+        }))
+        remaining_items = self.get_random_library_video(first_only=False)
+        for item in remaining_items:
+            xbmc.executeJSONRPC(json.dumps({
+                "jsonrpc": "2.0",
+                "method": "Playlist.Add",
+                "params": {"playlistid": 1, "item": item},
+                "id": "playlist_add_rest"
+            }))
+        xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
+        log("Random playlist started with first video playing immediately.")

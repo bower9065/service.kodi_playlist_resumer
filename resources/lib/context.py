@@ -5,12 +5,24 @@ import os
 import xbmcvfs
 from urllib.parse import parse_qs
 from xbmcaddon import Addon
+import traceback
+import time
 
 addon = Addon()
+ADDON_VERSION = addon.getAddonInfo('version')
+ADDON_NAME = addon.getAddonInfo('name')
 randomitems = addon.getSettingInt("randomitems")
 
+def log(message, exception_instance=None, level=xbmc.LOGDEBUG):
+    """
+    Log a message to the Kodi debug log, if debug logging is turned on.
+    """
+    message = f'### {ADDON_NAME} {ADDON_VERSION} - {message}'
+    if exception_instance:
+        message += f' ### Exception: {traceback.format_exc(exception_instance)}'
+    xbmc.log(message, level)
+
 def build_jsonrpc(method, params=None, rpc_id="1"):
-    """Helper to build JSON-RPC requests."""
     return json.dumps({
         "jsonrpc": "2.0",
         "method": method,
@@ -19,80 +31,70 @@ def build_jsonrpc(method, params=None, rpc_id="1"):
     })
 
 def safe_execute(query):
-    """Executes a JSON-RPC query and returns parsed JSON result."""
     response = xbmc.executeJSONRPC(query)
     try:
         return json.loads(response)
     except json.JSONDecodeError:
-        xbmc.log(f"JSON decode error for query: {query}", xbmc.LOGERROR)
+        log(f"JSON decode error for query: {query}", xbmc.LOGERROR)
         return {}
 
-def collect_ignored_ids():
-    """Return a set of (type, id) for items inside smart playlists."""
+def collect_playlist_items():
     ignored = set()
-    if not Addon().getSettingBool("IgnoreSmartPlaylistItems"):
-        return ignored
-
     playlist_dir = xbmcvfs.translatePath("special://userdata/library/video/playlists/")
     if not os.path.exists(playlist_dir):
+        log("No playlist directory found.")
         return ignored
 
-    query = build_jsonrpc("Files.GetDirectory", {"properties": ["title"], "directory": "library://video/playlists/"})
+    query = build_jsonrpc("Files.GetDirectory", {
+        "directory": "library://video/playlists/",
+        "properties": ["title"]
+    })
     result = safe_execute(query).get("result", {}).get("files", [])
+    log(f"Found {len(result)} playlists in directory.")
 
     for pl in result:
         playlist_path = pl["file"]
-        q = build_jsonrpc("Files.GetDirectory", {"properties": ["title"], "directory": playlist_path})
+        q = build_jsonrpc("Files.GetDirectory", {
+            "directory": playlist_path,
+            "properties": ["title"]
+        })
         items = safe_execute(q).get("result", {}).get("files", [])
+        log(f"Playlist '{playlist_path}' contains {len(items)} items.")
         for item in items:
-            ignored.add((item["type"], item["id"]))
+            item_type = item.get("type")
+            item_id = item.get("id")
+            if item_type and item_id:
+                ignored.add((item_type, item_id))
 
+    log(f"Total ignored items collected: {len(ignored)}")
     return ignored
 
-def filter_items(items, item_type, ignored_ids, list_item, ignored_collector):
-    """Filter playlist items, excluding ignored ones unless it's the current item."""
-    result = []
-    for it in items:
-        item_id = it[f"{item_type}id"]
-        key = (item_type, item_id)
-        if key not in ignored_ids or list_item == key:
-            result.append({f"{item_type}id": item_id})
-        else:
-            ignored_collector.append(f"{item_type}:{item_id}")
-    return result
+def find_playlist_for_item(db_type, dbid):
+    playlist_dir = xbmcvfs.translatePath("special://userdata/library/video/playlists/")
+    if not os.path.exists(playlist_dir):
+        return None
 
-def fetch_and_filter(
-    method,
-    result_key,
-    item_type,
-    ignored_ids,
-    list_item,
-    ignored_collector,
-    fetch_size=None,
-    max_keep=None,
-    params_extra=None
-):
-    """
-    Fetch items from Kodi library using JSON-RPC, filter out ignored items, 
-    and return up to `max_keep` valid results.
+    query = build_jsonrpc("Files.GetDirectory", {
+        "directory": "library://video/playlists/",
+        "properties": ["title"]
+    })
+    result = safe_execute(query).get("result", {}).get("files", [])
+    for pl in result:
+        playlist_path = pl["file"]
+        q = build_jsonrpc("Files.GetDirectory", {
+            "directory": playlist_path,
+            "properties": ["title"]
+        })
+        items = safe_execute(q).get("result", {}).get("files", [])
+        for item in items:
+            if item.get("type") == db_type and item.get("id") == int(dbid):
+                return playlist_path
+    return None
 
-    :param method: VideoLibrary method to call (e.g., 'GetMovies', 'GetEpisodes')
-    :param result_key: Key in JSON-RPC result ('movies', 'episodes', 'musicvideos')
-    :param item_type: Type of item ('movie', 'episode', 'musicvideo')
-    :param ignored_ids: IDs to exclude
-    :param list_item: Current list item being played (tuple of dbtype and dbid)
-    :param ignored_collector: list to collect ignored items for logging
-    :param fetch_size: number of items to fetch from Kodi (defaults to 2x max_keep)
-    :param max_keep: maximum number of items to return (defaults to Store.randomitems)
-    :param params_extra: dict of extra parameters to pass to JSON-RPC
-    :return: list of filtered items
-    """
-
-    # Use Store.randomitems if max_keep is not specified
+def fetch_and_filter(method, result_key, item_type, ignored_ids,
+                     fetch_size=None, max_keep=None, params_extra=None):
     if max_keep is None:
         max_keep = randomitems
-
-    # Fetch a little more than we want to keep to allow filtering
     if fetch_size is None:
         fetch_size = max_keep * 2
 
@@ -101,98 +103,94 @@ def fetch_and_filter(
         "sort": {"method": "random"},
         "properties": ["file"]
     }
-
     if params_extra:
         params.update(params_extra)
 
-    # Build and execute JSON-RPC
     query = build_jsonrpc(method, params)
     result = safe_execute(query).get("result", {}).get(result_key, [])
+    log(f"Fetched {len(result)} {item_type}s before filtering.")
 
-    # Filter items
-    filtered = filter_items(result, item_type, ignored_ids, list_item, ignored_collector)
+    filtered = []
+    for it in result:
+        item_id = it.get(f"{item_type}id")
+        if item_id and (item_type, item_id) not in ignored_ids:
+            filtered.append({f"{item_type}id": item_id})
 
-    # Return up to max_keep items
+    log(f"Filtered list ({len(filtered)} items): {filtered}")
     return filtered[:max_keep]
 
 if __name__ == "__main__":
     path = sys.listitem.getPath()
     dbid = xbmc.getInfoLabel("ListItem.DBID()")
     db_type = xbmc.getInfoLabel("ListItem.DBTYPE()")
-    tvshow_title = xbmc.getInfoLabel("ListItem.TVShowTitle()")
     tvshow_dbid = xbmc.getInfoLabel("ListItem.TvShowDBID()")
-    tvshow_season = "Season " + xbmc.getInfoLabel("ListItem.Season()")
-
     path_type, db_path = path.split("://", 1)
     db_path = db_path.split("?", 1)
     query = parse_qs(db_path[1]) if len(db_path) > 1 else None
     db_path = db_path[0].rstrip("/").split("/")
 
-    list_item = (db_type, int(dbid)) if dbid.isdigit() else None
-
     xbmc.executebuiltin("ActivateWindow(busydialognocancel)")
-
     try:
+        log(f"Started with path_type={path_type}, db_type={db_type}, dbid={dbid}, tvshow_dbid={tvshow_dbid}")
+
         if path_type == "videodb":
-            ignored_ids = collect_ignored_ids()
-            ignored_collector = []
-            playlist_items = []
+            playlist_path = find_playlist_for_item(db_type, dbid)
+            if playlist_path:
+                play_query = build_jsonrpc("Player.Open", {
+                    "item": {"recursive": True, "directory": playlist_path}
+                })
+                safe_execute(play_query)
+                log(f"Playing from playlist: {playlist_path}")
+            else:
+                log("Item not found in any playlist — collecting ignored items.")
+                ignored_ids = collect_playlist_items()
 
-            if db_type == "movie":
-                playlist_items = fetch_and_filter(
-                    "VideoLibrary.GetMovies", "movies", "movie",
-                    ignored_ids, list_item, ignored_collector
-                )
+                def fetch_items(count, tvshow=False):
+                    if db_type == "movie":
+                        return fetch_and_filter("VideoLibrary.GetMovies", "movies", "movie",
+                                                ignored_ids, max_keep=count)
+                    elif db_type == "episode":
+                        params_extra = {"tvshowid": int(tvshow_dbid)} if tvshow_dbid.isdigit() else None
+                        return fetch_and_filter("VideoLibrary.GetEpisodes", "episodes", "episode",
+                                                ignored_ids, max_keep=count, params_extra=params_extra)
+                    return []
 
-            elif db_type == "episode":
-                playlist_items = fetch_and_filter(
-                    "VideoLibrary.GetEpisodes", "episodes", "episode",
-                    ignored_ids, list_item, ignored_collector,
-                    params_extra={"tvshowid": int(tvshow_dbid)} if tvshow_dbid.isdigit() else None
-                )
+                # Step 1: Fetch and play 1 video
+                first_item = fetch_items(1)
+                if not first_item:
+                    log("No videos found to play after filtering.")
+                else:
+                    log(f"Playing first random item: {first_item}")
+                    xbmc.executeJSONRPC(build_jsonrpc("Playlist.Clear", {"playlistid": 1}))
+                    xbmc.executeJSONRPC(build_jsonrpc("Playlist.Add", {"playlistid": 1, "item": first_item[0]}))
+                    xbmc.sleep(100)
+                    xbmc.executeJSONRPC(build_jsonrpc("Player.Open", {"item": {"playlistid": 1, "position": 0}}))
 
-            elif db_type == "musicvideo":
-                playlist_items = fetch_and_filter(
-                    "VideoLibrary.GetMusicVideos", "musicvideos", "musicvideo",
-                    ignored_ids, list_item, ignored_collector
-                )
+                    # Step 2: Wait briefly for playback to start
+                    for _ in range(10):
+                        if xbmc.getCondVisibility("Player.HasVideo"):
+                            log("Playback started — now fetching more items.")
+                            break
+                        xbmc.sleep(500)
 
-            elif db_type == "tvshow":
-                playlist_items = fetch_and_filter(
-                    "VideoLibrary.GetEpisodes", "episodes", "episode",
-                    ignored_ids, list_item, ignored_collector,
-                    params_extra={"tvshowid": int(dbid)} if dbid.isdigit() else None
-                )
-
-            elif db_type == "season":
-                playlist_items = fetch_and_filter(
-                    "VideoLibrary.GetEpisodes", "episodes", "episode",
-                    ignored_ids, list_item, ignored_collector,
-                    params_extra={"season": int(xbmc.getInfoLabel('ListItem.Season()')), "tvshowid": int(tvshow_dbid)} if tvshow_dbid.isdigit() else None
-                )
-
-            # Single log line with all ignored items
-            if ignored_collector:
-                xbmc.log("----(Playlist Resumer)...IGNORED VIDEOS " + ", ".join(ignored_collector), xbmc.LOGINFO)
-
-            # Add playlist and play
-            if playlist_items:
-                clear = build_jsonrpc("Playlist.Clear", {"playlistid": 1}, "playlist_clear")
-                add = build_jsonrpc("Playlist.Add", {"playlistid": 1, "item": playlist_items}, "playlist_add")
-                play = build_jsonrpc("Player.Open", {"item": {"playlistid": 1, "position": 0}}, "player_open")
-
-                safe_execute(clear)
-                safe_execute(add)
-                xbmc.sleep(100)
-                safe_execute(play)
+                    # Step 3: Fetch more random videos and queue them
+                    remaining_items = fetch_items(randomitems - 1)
+                    if remaining_items:
+                        log(f"Adding {len(remaining_items)} additional random items to playlist.")
+                        for item in remaining_items:
+                            xbmc.executeJSONRPC(build_jsonrpc("Playlist.Add", {"playlistid": 1, "item": item}))
+                    else:
+                        log("No additional videos found to queue.")
 
         elif path_type == "library":
             query = build_jsonrpc("Player.Open", {
-                "item": {"recursive": True, "directory": path},
-                "options": {"shuffled": True}
-            }, "play_playlist")
+                "item": {"recursive": True, "directory": path}
+            })
             safe_execute(query)
-            xbmc.log(f"----(Playlist Resumer)...Playing random videos from {db_path[2]}", xbmc.LOGINFO)
+            log(f"Playing random videos from library path: {db_path[2]}")
 
+    except Exception as e:
+        log("Error during random playback setup.", e, xbmc.LOGERROR)
     finally:
         xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
+        log("Execution finished.")
