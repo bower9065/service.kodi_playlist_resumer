@@ -19,6 +19,8 @@ class Store:
     just_suspend = False
     currently_playing_file_path = ''
     type_of_video = None
+    was_trailer = False
+    was_audio = False
     library_id = -1
     paused_time = None
     length_of_currently_playing_file = 0

@@ -16,6 +16,9 @@ class KodiPlayer(xbmc.Player):
         log('KodiPlayer __init__')
 
     def onPlayBackPaused(self):
+        if self.isPlayingAudio():
+            log('Paused an audio track.')
+            return
         log('onPlayBackPaused')
         Store.paused_time = time.time()
         log(f'Playback paused at: {Store.paused_time}')
@@ -37,6 +40,21 @@ class KodiPlayer(xbmc.Player):
 
     def onAVStarted(self):
         log("onAVStarted")
+        if self.isPlayingAudio():
+            Store.was_audio = True
+            log("Playing audio track - entirely skipping addon processing.")
+            return 
+        else:
+            Store.was_audio = False
+        was_trailer = "-trailer" in xbmc.Player().getPlayingFile().lower()
+
+        if was_trailer:
+            log("Trailer identified! Setting flag and exiting loop tracking.")
+            Store.was_trailer = True
+            return
+        else:
+            Store.was_trailer = False 
+        
         if Store.just_woke or Store.just_suspend:
             log(f"Delaying onAVStarted: just_woke={Store.just_woke}, just_suspend={Store.just_suspend}")
             for _ in range(30):  
@@ -45,9 +63,6 @@ class KodiPlayer(xbmc.Player):
                 xbmc.sleep(1000)
             Store.just_woke = False
             Store.just_suspend = False
-        if not self.isPlayingVideo():
-            log("onAVStarted but is Not playing a video - skipping: ")
-            return
         Store.clear_old_play_details()
         xbmc.sleep(1500)
         Store.update_current_playing_file_path(self.getPlayingFile())
@@ -68,6 +83,9 @@ class KodiPlayer(xbmc.Player):
                 xbmc.sleep(1000)
 
     def onPlayBackSeek(self, time, seekOffset):
+        if self.isPlayingAudio():
+            log('Seek during audio track.')
+            return
         log(f'onPlayBackSeek time {time}, seekOffset {seekOffset}')
         try:
             self.update_resume_point(self.getTime())
@@ -78,6 +96,9 @@ class KodiPlayer(xbmc.Player):
             Store.just_woke = False
             Store.just_suspend = False
     def onPlayBackSeekChapter(self, chapter):
+        if self.isPlayingAudio():
+            log('Seek during audio track.')
+            return
         log(f'onPlayBackSeekChapter chapter: {chapter}')
         try:
             self.update_resume_point(self.getTime())
@@ -428,6 +449,14 @@ class KodiPlayer(xbmc.Player):
 
         if self.isPlaying():
             log("Auto Play Random stopped, video is already playing.")
+            return
+
+        if Store.was_trailer:
+            log("Auto Play Random stopped, last video was a trailer.")
+            return
+
+        if Store.was_audio:
+            log("Auto Play Random stopped, last played audio.")
             return
 
         xbmc.log('----(Playlist Resumer)...Preparing to play random videos.', xbmc.LOGINFO)
