@@ -1,6 +1,7 @@
 from random import randint
 from .common import *
 from .store import Store
+from . import music_resumer, video_queue
 import json
 import time
 import os
@@ -14,9 +15,15 @@ class KodiPlayer(xbmc.Player):
     def __init__(self, *args):
         xbmc.Player.__init__(self)
         log('KodiPlayer __init__')
+        self._active_media = None
+        self._restoring_music = False
+        self._preserve_music_on_stop = False
 
     def onPlayBackPaused(self):
+        if Store.kodi_event_monitor and Store.kodi_event_monitor.abortRequested():
+            return
         if self.isPlayingAudio():
+            music_resumer.capture(self)
             log('Paused an audio track.')
             return
         log('onPlayBackPaused')
@@ -24,28 +31,67 @@ class KodiPlayer(xbmc.Player):
         log(f'Playback paused at: {Store.paused_time}')
 
     def onPlayBackEnded(self):  # video ended normally (user didn't stop it)
+        if Store.kodi_event_monitor and Store.kodi_event_monitor.abortRequested():
+            return
         log("onPlayBackEnded")
+        if self._active_media != 'music' and video_queue.snapshots_blocked():
+            log("Ignoring video end during unfinished queue construction")
+            return
+        if self._active_media == 'music':
+            if music_resumer.should_preserve_on_track_end():
+                log('Music track ended: next track remains; keeping resume snapshot')
+            else:
+                music_resumer.clear()
+            return
         self.update_resume_point(-1)
         self.autoplay_random_if_enabled()
 
     def onPlayBackStopped(self):  # user stopped / shutdown
         log("Attempting onPlayBackStopped")
-        xbmc.sleep(3000)
+        # Normal stops keep their three-second grace period. Kodi shutdown
+        # must be able to interrupt it instead of waiting for a fixed sleep.
+        monitor = Store.kodi_event_monitor
+        if monitor is not None:
+            if monitor.waitForAbort(3):
+                log("Kodi shutdown requested: stop handler exits immediately")
+                return
+        else:
+            # The service normally supplies a monitor. This covers the rare
+            # startup/teardown callback before that reference is available.
+            if xbmc.Monitor().waitForAbort(3):
+                return
+        if self._active_media != 'music' and video_queue.snapshots_blocked():
+            log("Preserving video snapshot: queue build still incomplete")
+            return
         if Store.just_woke or Store.just_suspend:
             log(f"Skipping onPlayBackStopped: just_woke={Store.just_woke}, just_suspend={Store.just_suspend}")
             return
         else:    
             log(f"NOT Skipping onPlayBackStopped: just_woke={Store.just_woke}, just_suspend={Store.just_suspend}")
+            if self._active_media == 'music':
+                if self._preserve_music_on_stop:
+                    self._preserve_music_on_stop = False
+                    return
+                if not Store.resume_if_stopped and not Store.kodi_event_monitor.abortRequested():
+                    music_resumer.clear()
+                return
             self.update_resume_point(-2)
 
     def onAVStarted(self):
+        if Store.kodi_event_monitor and Store.kodi_event_monitor.abortRequested():
+            return
         log("onAVStarted")
         if self.isPlayingAudio():
             Store.was_audio = True
-            log("Playing audio track - entirely skipping addon processing.")
-            return 
+            self._active_media = 'music'
+            Store.record_last_used_media('music')
+            if not self._restoring_music:
+                music_resumer.capture(self)
+            log("Playing audio track - music queue snapshot enabled.")
+            return
         else:
             Store.was_audio = False
+            self._active_media = 'video'
         was_trailer = "-trailer" in xbmc.Player().getPlayingFile().lower()
 
         if was_trailer:
@@ -53,18 +99,25 @@ class KodiPlayer(xbmc.Player):
             Store.was_trailer = True
             return
         else:
-            Store.was_trailer = False 
-        
+            Store.was_trailer = False
+        # Trailers and deliberately excluded sources must not change priority.
+        if not Store.is_excluded(self.getPlayingFile()):
+            Store.record_last_used_media('video')
+
         if Store.just_woke or Store.just_suspend:
             log(f"Delaying onAVStarted: just_woke={Store.just_woke}, just_suspend={Store.just_suspend}")
             for _ in range(30):  
                 if Store.kodi_event_monitor.abortRequested():
                     return
-                xbmc.sleep(1000)
+                if Store.kodi_event_monitor.waitForAbort(1):
+                    return
             Store.just_woke = False
             Store.just_suspend = False
-        Store.clear_old_play_details()
-        xbmc.sleep(1500)
+        # Keep the last valid resume snapshot until the new queue has been
+        # verified and saved, rather than deleting it before inspecting Kodi.
+        Store.clear_old_play_details(keep_resume_snapshot=True)
+        if Store.kodi_event_monitor.waitForAbort(1.5):
+            return
         Store.update_current_playing_file_path(self.getPlayingFile())
         Store.length_of_currently_playing_file = self.getTotalTime()
         try:
@@ -74,16 +127,27 @@ class KodiPlayer(xbmc.Player):
         while self.isPlaying() and not Store.kodi_event_monitor.abortRequested():
             if not xbmc.getCondVisibility('Player.Paused'):
                 try:
+                    # Retry a snapshot if Kodi had not finished updating its
+                    # playlist when AV playback first started.
+                    if not Store.currently_playing_file_path:
+                        Store.update_current_playing_file_path(self.getPlayingFile())
                     self.update_resume_point(self.getTime())
                 except RuntimeError:
                     log('Could not get current playback time from player')
-            for i in range(0, Store.save_interval_seconds):
+            # When fast-starting, retry a missing initial snapshot each second
+            # so it is written promptly after the full queue is available.
+            interval = 1 if not Store.currently_playing_file_path else Store.save_interval_seconds
+            for i in range(0, interval):
                 if Store.kodi_event_monitor.abortRequested() or not self.isPlaying():
                     return
-                xbmc.sleep(1000)
+                if Store.kodi_event_monitor.waitForAbort(1):
+                    return
 
     def onPlayBackSeek(self, time, seekOffset):
+        if Store.kodi_event_monitor and Store.kodi_event_monitor.abortRequested():
+            return
         if self.isPlayingAudio():
+            music_resumer.capture(self)
             log('Seek during audio track.')
             return
         log(f'onPlayBackSeek time {time}, seekOffset {seekOffset}')
@@ -96,7 +160,10 @@ class KodiPlayer(xbmc.Player):
             Store.just_woke = False
             Store.just_suspend = False
     def onPlayBackSeekChapter(self, chapter):
+        if Store.kodi_event_monitor and Store.kodi_event_monitor.abortRequested():
+            return
         if self.isPlayingAudio():
+            music_resumer.capture(self)
             log('Seek during audio track.')
             return
         log(f'onPlayBackSeekChapter chapter: {chapter}')
@@ -116,7 +183,10 @@ class KodiPlayer(xbmc.Player):
         :param: Store.library_id: the Kodi library id of the currently playing file
         :return: None
         """
-        seconds = int(seconds)    
+        seconds = int(seconds)
+        if video_queue.snapshots_blocked() and not self.isPlayingAudio():
+            log("Deferring resume point update while video queue is incomplete")
+            return
         if not Store.currently_playing_file_path:
             log("No valid currently_playing_file_path found - therefore not setting resume point")
             return
@@ -145,25 +215,28 @@ class KodiPlayer(xbmc.Player):
             log(f'Resume point ({seconds}) is below Kodi\'s ignoresecondsatstart'
                 f' setting of {Store.ignore_seconds_at_start}, setting resume point to 0')
             seconds = 0
-            with open(Store.file_to_store_resume_point, 'w') as f:
-                f.write(str(seconds))
+            Store.update_video_snapshot(seconds=seconds)
         # if current time > Kodi's ignorepercentatend setting, save resume point
         percent_played = int((seconds * 100) / Store.length_of_currently_playing_file)
         if percent_played > (100 - Store.ignore_percent_at_end):
             log(f'Resume point as current percent played ({percent_played}) is above Kodi\'s ignorepercentatend'
                 f' setting of {Store.ignore_percent_at_end}, setting resume point to 0')
             seconds = 0
-            with open(Store.file_to_store_resume_point, 'w') as f:
-                f.write(str(seconds))
+            Store.update_video_snapshot(seconds=seconds)
         # if seconds between start ignore and end ignore, save resume point
         if percent_played < (100 - Store.ignore_percent_at_end) and seconds > Store.ignore_seconds_at_start :
             log(f'Setting custom resume seconds to {seconds}')
-            with open(Store.file_to_store_resume_point, 'w') as f:
-                f.write(str(seconds))                             
+            Store.update_video_snapshot(seconds=seconds)                             
         if seconds == 0:
             log(f'Removing resume point for: {Store.currently_playing_file_path}, type: {Store.type_of_video}, library id: {Store.library_id}')
         else:
             log(f'Setting resume point for: {Store.currently_playing_file_path}, type: {Store.type_of_video}, library id: {Store.library_id}, to: {seconds} seconds')
+        # Keep our own local resume snapshot up to date even while browsing.
+        # Only write Kodi's library bookmark when the video player is fullscreen.
+        # Otherwise Set*Details emits library updates that may refresh artwork.
+        if not (self.isPlayingVideo() and xbmc.getCondVisibility('VideoPlayer.IsFullscreen')):
+            log('Skipping Kodi library resume write: video is not fullscreen (local snapshot preserved)')
+            return
         id_name = None
         if Store.type_of_video == 'episode':
             method = 'VideoLibrary.SetEpisodeDetails'
@@ -227,140 +300,254 @@ class KodiPlayer(xbmc.Player):
         send_kodi_json(f'Check new resume point & total for: {Store.currently_playing_file_path}, type: {Store.type_of_video}, id: {Store.library_id}', query)
 
     def resume_if_was_playing(self):
+        """Restore preferred media without repeating the startup delay on fallback."""
+        if Store.kodi_event_monitor and Store.kodi_event_monitor.abortRequested():
+            return False
+        if self.isPlaying() or not Store.resume_on_startup:
+            return False
+        startup_started = time.monotonic()
+        priority = getattr(Store, 'restore_priority', 'video')
+        if priority == 'last_used':
+            priority = Store.get_last_used_media()
+        log(f"Startup restore priority resolved to: {priority}")
+        if priority == 'music':
+            return (music_resumer.restore(self, startup_started=startup_started)
+                    or self.resume_video_if_was_playing(startup_started=startup_started))
+        return (self.resume_video_if_was_playing(startup_started=startup_started)
+                or music_resumer.restore(self, startup_started=startup_started))
+
+    def capture_music_if_due(self):
+        """Called by the service loop, rather than blocking Kodi's callbacks."""
+        if self.isPlayingAudio():
+            music_resumer.capture(self)
+
+    def _clear_music_after_video_restore(self, monitor, verified=False):
+        """Discard music only for a verified, completed automatic video restore."""
+        if (verified and not monitor.abortRequested() and self.isPlayingVideo()
+                and Store.get_music_snapshot() is not None):
+            music_resumer.clear()
+            log('Verified video restored: cleared saved music resume playlist')
+
+    def _wait_for_restored_filepath(self, expected_file, monitor):
+        """Player.play() is asynchronous; a successful call is not proof."""
+        for _ in range(50):
+            if monitor.abortRequested():
+                return False
+            if self.isPlayingVideo():
+                try:
+                    if self.getPlayingFile() == expected_file:
+                        return True
+                except RuntimeError:
+                    pass
+            if monitor.waitForAbort(0.2):
+                return False
+        log('Video restore: saved filepath did not start; keeping music resume')
+        return False
+
+    def resume_video_if_was_playing(self, startup_started=None):
         """
         Automatically resume a video after a crash.
         Restores playlist by:
-        1) Adding first item
-        2) Starting playback
-        3) Seeking
-        4) Adding remaining items
+        1) Adding all remaining items in batches
+        2) Starting playback with the complete queue
+        3) Seeking to the saved resume position
         """
 
         if self.isPlaying():
             log("Resume stopped: already playing")
             return False
 
-        monitor = xbmc.Monitor()
-
-        if not (
-            Store.resume_on_startup
-            and os.path.exists(Store.file_to_store_resume_point)
-            and os.path.exists(Store.file_to_store_playlist_items)
-            and os.path.exists(Store.file_to_store_playlist_position)
-        ):
-            log("Resume stopped: missing resume files")
+        monitor = Store.kodi_event_monitor or xbmc.Monitor()
+        if monitor.abortRequested():
             return False
 
-        with open(Store.file_to_store_playlist_items, "r") as f:
-            items_json = f.read()
-
-        if items_json == "[]":
-            log("Resume stopped: empty playlist")
+        snapshot = Store.get_video_snapshot()
+        if (not Store.resume_on_startup or not snapshot or
+                not snapshot.get('items') or snapshot.get('seconds') is None or
+                snapshot.get('position') is None):
+            log('Resume stopped: no complete video snapshot in resume data.json')
+            return False
+        saved_items = snapshot['items']
+        if not isinstance(saved_items, (str, list)):
+            log('Resume stopped: invalid stored playlist type')
+            return False
+        if isinstance(saved_items, list) and not saved_items:
+            log('Resume stopped: empty playlist')
             return False
 
-        # Idle delay logic (unchanged, but compact)
-        if not monitor.waitForAbort(max(int(Store.resume_delay) - 4, 0)):
-            if xbmc.getGlobalIdleTime() >= int(Store.resume_delay) - 4:
-                notify("Preparing to resume playback...", xbmcgui.NOTIFICATION_INFO)
-                monitor.waitForAbort(4)
-            else:
-                log("Resume canceled: idle time pre-check failed")
-                return True
-
-        if xbmc.getGlobalIdleTime() < int(Store.resume_delay):
+        # Both media types share the same startup-delay clock, so a failed
+        # preferred restoration cannot force a second full wait.
+        delay = max(0, int(Store.resume_delay))
+        if startup_started is None:
+            startup_started = time.monotonic()
+        remaining = max(0.0, delay - (time.monotonic() - startup_started))
+        if monitor.waitForAbort(max(remaining - 4.0, 0.0)):
+            return False
+        if xbmc.getGlobalIdleTime() < max(delay - 4, 0) or self.isPlaying():
+            log("Resume canceled: idle time pre-check failed")
+            return True
+        remaining = max(0.0, delay - (time.monotonic() - startup_started))
+        if remaining > 0:
+            notify("Preparing to resume video playback...", xbmcgui.NOTIFICATION_INFO)
+        if monitor.waitForAbort(remaining):
+            return False
+        if xbmc.getGlobalIdleTime() < delay or self.isPlaying():
             log("Resume canceled: idle time final check failed")
             return True
 
-        notify("Resuming playback...", xbmcgui.NOTIFICATION_INFO)
+        notify("Resuming video playback...", xbmcgui.NOTIFICATION_INFO)
         xbmc.executebuiltin("ActivateWindow(busydialognocancel)")
 
-        # Read resume point
+        # Read the video snapshot from the same JSON object used for music.
         try:
-            with open(Store.file_to_store_resume_point, "r") as f:
-                resume_point = float(f.read())
-        except Exception:
-            log("Invalid resume point file")
-            xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
+            resume_point = float(snapshot['seconds'])
+            if resume_point < 0:
+                raise ValueError('negative saved time')
+        except (ValueError, TypeError, KeyError):
+            log('Invalid saved video resume position')
+            xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
             return False
 
         # ---- FILEPATH PLAYBACK ----
-        if not any(k in items_json for k in ("movieid", "episodeid", "musicvideoid")):
-            log("Resuming via filepath")
-            self.play(items_json)
-            xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
+        if isinstance(saved_items, str):
+            log('Resuming via filepath')
+            self.play(saved_items)
+            verified = self._wait_for_restored_filepath(saved_items, monitor)
+            xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
+            self._clear_music_after_video_restore(monitor, verified=verified)
             return True
 
         # ---- PLAYLIST PLAYBACK ----
-        items = json.loads(items_json)
+        items = saved_items
+        try:
+            position = int(snapshot['position'])
+        except (ValueError, TypeError, KeyError):
+            log('Invalid saved video playlist position')
+            xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
+            return False
 
-        with open(Store.file_to_store_playlist_position, "r") as f:
-            position = int(f.read())
+        if not isinstance(items, list) or not items:
+            log("Resume stopped: stored playlist has no playable entries")
+            xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
+            return False
+
+        # Prefer exact saved library identity over a potentially stale index.
+        saved_identity = snapshot.get('resume_item')
+        saved_item = (saved_identity.get('item')
+                      if isinstance(saved_identity, dict) else None)
+        saved_file = (saved_identity.get('file')
+                      if isinstance(saved_identity, dict) else None)
+
+        if isinstance(saved_item, dict) and saved_item:
+            positions = [i for i, item in enumerate(items) if item == saved_item]
+            if not positions:
+                log(f"Resume stopped: saved video {saved_item} not in saved playlist; "
+                    "refusing to play the wrong file")
+                xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
+                return False
+            position = position if position in positions else positions[0]
+            log(f"Resume target matched by ID: {saved_item} at index {position}")
+        elif not 0 <= position < len(items):
+            log(f"Resume stopped: old stored position {position} invalid "
+                f"for {len(items)} saved items")
+            xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
+            return False
 
         first_item = items[position]
         remaining_items = items[position + 1 :]
 
-        # Clear playlist
-        xbmc.executeJSONRPC(json.dumps({
-            "jsonrpc": "2.0",
-            "method": "Playlist.Clear",
-            "params": {"playlistid": 1},
-            "id": 1
-        }))
+        # Start the saved video and seek to the verified saved position before
+        # appending the remaining videos. The guard prevents early snapshots.
+        queue = [first_item] + remaining_items
+        playback_verified = [False]
+        def seek_saved_video():
+            # Seek only once playback is ready.
+            waited = 0
+            while (
+                not self.isPlayingVideo()
+                or self.getTotalTime() <= 0
+            ) and not monitor.abortRequested() and waited < 50:
+                monitor.waitForAbort(0.2)
+                waited += 1
 
-        # Add first item only
-        xbmc.executeJSONRPC(json.dumps({
-            "jsonrpc": "2.0",
-            "method": "Playlist.Add",
-            "params": {"playlistid": 1, "item": first_item},
-            "id": 2
-        }))
+            if monitor.abortRequested():
+                return
+            if self.isPlayingVideo():
+                # Playback starting is not enough: verify which video Kodi opened
+                # before seeking to the previously saved time.
+                playing_item = None
+                try:
+                    playing_response = json.loads(xbmc.executeJSONRPC(json.dumps({
+                        "jsonrpc": "2.0", "method": "Player.GetItem",
+                        "params": {"playerid": 1, "properties": ["file"]},
+                        "id": "resume_playing_item"
+                    })))
+                    playing_item = playing_response.get('result', {}).get('item', {})
+                except (ValueError, TypeError):
+                    pass
 
-        # Start playback
-        xbmc.executeJSONRPC(json.dumps({
-            "jsonrpc": "2.0",
-            "method": "Player.Open",
-            "params": {"item": {"playlistid": 1, "position": 0}},
-            "id": 3
-        }))
-        
+                # A matching identity or filepath must be positively verified
+                # before a successful queue build may invalidate saved music.
+                # Without the saved resume_item, use the expected first entry.
+                expected_item = saved_item if saved_item else first_item
+                verified_by_id = False
+                if isinstance(expected_item, dict) and isinstance(playing_item, dict):
+                    kind = playing_item.get('type')
+                    item_id = playing_item.get('id')
+                    verified_by_id = (isinstance(kind, str) and
+                                      type(item_id) is int and
+                                      expected_item.get(kind + 'id') == item_id)
+                try:
+                    playing_file = self.getPlayingFile()
+                except RuntimeError:
+                    playing_file = None
+                file_matches = bool(saved_file and playing_file == saved_file)
+                if not verified_by_id and not file_matches:
+                    log(f"Resume skipped seek: expected {expected_item} / {saved_file}, "
+                        f"but Kodi opened {playing_item} / {playing_file}")
+                    notify("Resume: Kodi started a different video", xbmcgui.NOTIFICATION_WARNING)
+                elif saved_file and not file_matches:
+                    log(f"Resume skipped seek: expected file {saved_file} but Kodi opened "
+                        f"{playing_file}")
+                    notify("Resume: playback file mismatch", xbmcgui.NOTIFICATION_WARNING)
+                else:
+                    playback_verified[0] = True
+                    offset = resume_point - int(Store.resume_offset)
+                    try:
+                        self.seekTime(offset if offset > 0 else resume_point)
+                        log("Resume seek completed for verified video")
+                    except RuntimeError:
+                        log("Seek failed, but the playlist is fully restored")
+            else:
+                log("Playback was not ready for resume seek")
+        started, complete = video_queue.start_queue(
+            queue, batch_size=200, monitor=monitor, after_open=seek_saved_video)
         xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
-        
-        # Wait for player readiness
-        waited = 0
-        while (
-            not self.isPlayingVideo()
-            or self.getTotalTime() <= 0
-        ) and not monitor.abortRequested() and waited < 50:
-            monitor.waitForAbort(0.2)
-            waited += 1
-
-        # Seek AFTER playback starts
-        offset = resume_point - int(Store.resume_offset)
-        self.seekTime(offset if offset > 0 else resume_point)
-        log("Seek completed")
-
-        # Add remaining items AFTER seek
-        for item in remaining_items:
-            xbmc.executeJSONRPC(json.dumps({
-                "jsonrpc": "2.0",
-                "method": "Playlist.Add",
-                "params": {"playlistid": 1, "item": item},
-                "id": 4
-            }))
-
-        log("Remaining playlist items added")
-
-        xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
+        if not started:
+            log("Video resume could not start the saved item")
+            return False
+        if not complete:
+            log("Video resume first item playing, but queue is incomplete; "
+                "previous saved snapshot retained")
+            return True
+        log(f"Restored {len(queue)} videos via fast-start playback")
+        self._clear_music_after_video_restore(monitor, verified=playback_verified[0])
         return True
 
+    def get_random_library_video(self, first_only=False, tvshow_id=None, ignored_ids=None):
+        """Return eligible Kodi library IDs without recursive retries or modal dialogs.
 
-    def get_random_library_video(self, first_only=False, tvshow_id=None):
+        Try each enabled content type at most once. A show with no remaining
+        eligible episodes is a valid result (the first episode can play alone).
         """
-        Get random videos from the library.
-        If first_only=True, fetch only 1 item for immediate playback.
-        If tvshow_id is provided, fetch episodes only from that TV show.
-        """
-        xbmc.executebuiltin('ActivateWindow(busydialognocancel)')
+        if Store.kodi_event_monitor and Store.kodi_event_monitor.abortRequested():
+            return []
+        if ignored_ids is None:
+            # Use the same short-lived smart-playlist exclusion cache as the
+            # context menu. A single Auto Play Random run collects it once.
+            from .context import collect_ignored_ids
+            ignored_ids = set(collect_ignored_ids())
+
         enabled_types = []
         if get_setting_as_bool("randomtv") and Store.video_types_in_library.get("episodes"):
             enabled_types.append(("episodes", "GetEpisodes"))
@@ -369,171 +556,151 @@ class KodiPlayer(xbmc.Player):
         if get_setting_as_bool("randommusicvideos") and Store.video_types_in_library.get("musicvideos"):
             enabled_types.append(("musicvideos", "GetMusicVideos"))
 
-        if not enabled_types:
-            log("No enabled video types in library. Cannot autoplay random video.")
-            return []
-
-        # If we're fetching episodes from a specific TV show, override result_type/method
-        if tvshow_id:
-            result_type, method = "episodes", "GetEpisodes"
+        if tvshow_id is not None:
+            if not any(kind == "episodes" for kind, _ in enabled_types):
+                log("Auto Play Random: TV episode selection is disabled")
+                return []
+            # Constrain the rest of an episode queue to its original show.
+            candidates = [("episodes", "GetEpisodes")]
         else:
-            result_type, method = enabled_types[randint(0, len(enabled_types)-1)]
+            if not enabled_types:
+                log("Auto Play Random: no enabled video types in library")
+                return []
+            start = randint(0, len(enabled_types) - 1)
+            candidates = enabled_types[start:] + enabled_types[:start]
 
-        log(f'Getting a random video from: {result_type}')
+        target = max(1, int(Store.randomitems))
+        for result_type, method in candidates:
+            if Store.kodi_event_monitor and Store.kodi_event_monitor.abortRequested():
+                return []
+            # Fetch extra candidates when some might be excluded by smart
+            # playlists. One first-only candidate can be excluded, so asking
+            # Kodi for just one used to leave us with an empty result.
+            limit_count = (min(max(50, target * 2), 10000)
+                           if ignored_ids else (1 if first_only else target))
+            query_params = {
+                "limits": {"end": limit_count},
+                "sort": {"method": "random"}
+            }
+            if tvshow_id is not None:
+                query_params["tvshowid"] = tvshow_id
 
-        limit_count = 1 if first_only else Store.randomitems
-        query_params = {
-            "limits": {"end": limit_count},
-            "sort": {"method": "random"},
-            "properties": ["file"]
-        }
-        if tvshow_id:
-            query_params["tvshowid"] = tvshow_id
+            query = {
+                "jsonrpc": "2.0", "id": "randomLibraryVideo",
+                "method": "VideoLibrary." + method,
+                "params": query_params
+            }
+            try:
+                response = json.loads(xbmc.executeJSONRPC(json.dumps(query)))
+            except (ValueError, TypeError) as error:
+                log(f"Auto Play Random: bad {method} response: {error}")
+                continue
+            if "error" in response:
+                log(f"Auto Play Random: {method} failed: {response['error']}")
+                continue
+            video_list = response.get("result", {}).get(result_type, [])
+            item_key = result_type[:-1] + "id"
+            item_type = result_type[:-1]
+            eligible = []
+            for item in video_list:
+                video_id = item.get(item_key)
+                if isinstance(video_id, int) and (item_type, video_id) not in ignored_ids:
+                    eligible.append({item_key: video_id})
+                    if len(eligible) >= (1 if first_only else target):
+                        break
 
-        query = {
-            "jsonrpc": "2.0",
-            "id": "randomLibraryVideo",
-            "method": f"VideoLibrary.{method}",
-            "params": query_params
-        }
-
-        json_response = json.loads(xbmc.executeJSONRPC(json.dumps(query)))
-
-        ignored_ids = set()
-        if Addon().getSettingBool("IgnoreSmartPlaylistItems"):
-            playlists_dir = xbmcvfs.translatePath("special://userdata/library/video/playlists/")
-            if os.path.exists(playlists_dir):
-                playlist_list = json.loads(xbmc.executeJSONRPC(json.dumps({
-                    "jsonrpc":"2.0",
-                    "method":"Files.GetDirectory",
-                    "params":{"properties": ["title"], "directory":"library://video/playlists/"},
-                    "id":"get_directory"
-                })))['result']['files']
-                for pl in playlist_list:
-                    playlist_items = json.loads(xbmc.executeJSONRPC(json.dumps({
-                        "jsonrpc":"2.0",
-                        "method":"Files.GetDirectory",
-                        "params":{"properties": ["title"], "directory": pl["file"]},
-                        "id":"get_directory"
-                    })))['result']['files']
-                    for item in playlist_items:
-                        ignored_ids.add((item['type'], item['id']))
-            else:
-                log("Playlist directory does not exist")
-        else:
-            log("Ignore Smart Playlist Items is turned off")
-
-        video_list = json_response['result'].get(result_type, [])
-        random_list = []
-        for item in video_list:
-            vid_id = item[f"{result_type[:-1]}id"]
-            if (result_type[:-1], vid_id) not in ignored_ids:
-                random_list.append({f"{result_type[:-1]}id": vid_id})
-
-        if not random_list:
-            log(f"All {result_type} are ignored. Trying another type...")
-            Store.video_types_in_library[result_type] = False
-            return self.get_random_library_video(first_only, tvshow_id)
-
-        return random_list
-
+            if eligible:
+                log(f"Auto Play Random: selected {len(eligible)} {result_type}")
+                return eligible
+            log(f"Auto Play Random: no eligible {result_type}")
+            # Do not recurse with tvshow_id. If the show is completely excluded
+            # retrying the identical query can loop forever.
+        return []
 
     def autoplay_random_if_enabled(self):
+        """Start an eligible random queue, always releasing the Kodi busy dialog.
+
+        As in v1.1.34, build the complete queue before Player.Open so resume
+        snapshots can never save only the first video of an in-progress queue.
         """
-        Play a random video if enabled, fetching one first for immediate playback,
-        then fetching the rest to append to the playlist.
-        """
-        if not Store.autoplay_random:
-            log("Auto Play Random stopped, turned off.")
+        if not Store.autoplay_random or getattr(self, "_autoplay_busy", False):
             return
-
-        if self.isPlaying():
-            log("Auto Play Random stopped, video is already playing.")
+        if Store.kodi_event_monitor and Store.kodi_event_monitor.abortRequested():
             return
-
-        if Store.was_trailer:
-            log("Auto Play Random stopped, last video was a trailer.")
+        if self.isPlaying() or Store.was_trailer or Store.was_audio:
             return
+        self._autoplay_busy = True
+        try:
+            xbmc.log('----(Playlist Resumer)...Preparing to play random videos.', xbmc.LOGINFO)
+            monitor = Store.kodi_event_monitor
+            delay = max(int(Store.random_delay), 0)
+            # Avoid a long uninterruptible sleep when Kodi is closing.
+            if monitor.waitForAbort(max(delay - 4, 0)):
+                return
+            if xbmc.getGlobalIdleTime() >= max(delay - 4, 0):
+                notify('Preparing to play random videos...', xbmcgui.NOTIFICATION_INFO)
+                if monitor.waitForAbort(4):
+                    return
+            if xbmc.getGlobalIdleTime() < delay or self.isPlaying():
+                log("Auto Play Random stopped: idle interrupted or another video started")
+                return
 
-        if Store.was_audio:
-            log("Auto Play Random stopped, last played audio.")
-            return
+            # Never activate the non-cancelable spinner here. The previous
+            # implementation opened it in the library query and could leave
+            # it stuck open on empty results, exceptions or recursive retries.
+            from .context import collect_ignored_ids
+            ignored_ids = set(collect_ignored_ids())
+            first_items = self.get_random_library_video(first_only=True, ignored_ids=ignored_ids)
+            if not first_items:
+                log('Auto Play Random: no eligible video found')
+                notify('Auto Play Random: no eligible videos', xbmcgui.NOTIFICATION_WARNING)
+                return
+            first_item = first_items[0]
+            remaining_items = []
+            if 'episodeid' in first_item:
+                details_query = {
+                    "jsonrpc": "2.0", "method": "VideoLibrary.GetEpisodeDetails",
+                    "params": {"episodeid": first_item['episodeid'], "properties": ["tvshowid"]},
+                    "id": "get_episode"
+                }
+                details = json.loads(xbmc.executeJSONRPC(json.dumps(details_query)))
+                tvshow_id = details.get('result', {}).get('episodedetails', {}).get('tvshowid')
+                if isinstance(tvshow_id, int):
+                    remaining_items = self.get_random_library_video(
+                        first_only=False, tvshow_id=tvshow_id, ignored_ids=ignored_ids)
+                else:
+                    log('Auto Play Random: episode has no TV show ID; playing it alone')
+            else:
+                remaining_items = self.get_random_library_video(
+                    first_only=False, ignored_ids=ignored_ids)
 
-        xbmc.log('----(Playlist Resumer)...Preparing to play random videos.', xbmc.LOGINFO)
-        xbmc.sleep((int(Store.random_delay) - 4) * 1000)
+            # Maintain original random order, but avoid duplicate queue IDs.
+            queued = []
+            seen = set()
+            for item in [first_item] + remaining_items:
+                key = tuple(sorted(item.items()))
+                if key not in seen:
+                    queued.append(item)
+                    seen.add(key)
+            if monitor.abortRequested() or self.isPlaying():
+                log('Auto Play Random canceled before changing the playlist')
+                return
 
-        if xbmc.getGlobalIdleTime() >= (int(Store.random_delay) - 4):
-            notify('Preparing to play random videos...', xbmcgui.NOTIFICATION_INFO)
-            xbmc.sleep(4000)
-
-        if xbmc.getGlobalIdleTime() < int(Store.random_delay):
-            notify('Play random videos canceled', xbmcgui.NOTIFICATION_INFO)
-            log("Auto Play Random stopped, idle time failed.")
-            return
-
-        notify('Playing random videos...', xbmcgui.NOTIFICATION_INFO)
-        log("Auto Play Random starting, idle time passed")
-
-        # Get the first random video
-        first_item = self.get_random_library_video(first_only=True)
-        if not first_item:
-            log("No random video found to play.")
-            return
-
-        # Clear the playlist and add first item
-        xbmc.executeJSONRPC(json.dumps({
-            "jsonrpc": "2.0",
-            "method": "Playlist.Clear",
-            "params": {"playlistid": 1},
-            "id": "playlist_clear"
-        }))
-
-        xbmc.executeJSONRPC(json.dumps({
-            "jsonrpc": "2.0",
-            "method": "Playlist.Add",
-            "params": {"playlistid": 1, "item": first_item},
-            "id": "playlist_add_first"
-        }))
-
-        xbmc.sleep(100)
-
-        xbmc.executeJSONRPC(json.dumps({
-            "jsonrpc": "2.0",
-            "method": "Player.Open",
-            "params": {"item": {"playlistid": 1, "position": 0}},
-            "id": "player_open"
-        }))
-        
-        xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
-        
-        # Determine remaining items
-        remaining_items = []
-
-        if first_item and 'episodeid' in first_item[0]:
-            # Fetch TV show ID from first episode
-            episode_id = first_item[0]['episodeid']
-            episode_info = json.loads(xbmc.executeJSONRPC(json.dumps({
-                "jsonrpc": "2.0",
-                "method": "VideoLibrary.GetEpisodeDetails",
-                "params": {"episodeid": episode_id, "properties": ["tvshowid"]},
-                "id": "get_episode"
-            })))['result']['episodedetails']
-            tvshow_id = episode_info['tvshowid']
-
-            # Get remaining episodes from the same TV show
-            remaining_items = self.get_random_library_video(first_only=False, tvshow_id=tvshow_id)
-        else:
-            # For movies/musicvideos, get random items
-            remaining_items = self.get_random_library_video(first_only=False)
-
-        # Add remaining items to playlist
-        for item in remaining_items:
-            xbmc.executeJSONRPC(json.dumps({
-                "jsonrpc": "2.0",
-                "method": "Playlist.Add",
-                "params": {"playlistid": 1, "item": item},
-                "id": "playlist_add_rest"
-            }))
-
-        xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
-        log("Random playlist started with first video playing immediately.")
+            started, complete = video_queue.start_queue(
+                queued, batch_size=50, monitor=monitor)
+            if not started:
+                log('Auto Play Random: could not start first video')
+                notify('Auto Play Random: could not start playback', xbmcgui.NOTIFICATION_WARNING)
+                return
+            if not complete:
+                log('Auto Play Random: playback started, but remaining queue is incomplete')
+                notify('Auto Play Random: incomplete queue', xbmcgui.NOTIFICATION_WARNING)
+                return
+            log(f'Auto Play Random: started first video, then added {len(queued) - 1} remaining items')
+        except Exception as error:
+            log(f'Auto Play Random failed: {error}', error)
+            notify('Auto Play Random failed; check Kodi log', xbmcgui.NOTIFICATION_WARNING)
+        finally:
+            # Clear even a busy dialog left by a previous version of this code.
+            xbmc.executebuiltin('Dialog.Close(busydialognocancel)')
+            self._autoplay_busy = False

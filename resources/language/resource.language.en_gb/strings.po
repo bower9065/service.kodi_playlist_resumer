@@ -96,6 +96,7 @@ msgstr ""
 
 msgctxt "#32035"
 msgid "Play Random"
+msgstr ""
 
 msgctxt "#32036"
 msgid "Add (Play Random) to Context Menu"
@@ -107,3 +108,20 @@ msgstr ""
 
 msgctxt "#32038"
 msgid " ∟Number of library items to retrieve"
+msgstr ""
+
+msgctxt "#32039"
+msgid "∟Resume Priority"
+msgstr ""
+
+msgctxt "#32040"
+msgid "Video"
+msgstr ""
+
+msgctxt "#32041"
+msgid "Music"
+msgstr ""
+
+msgctxt "#32042"
+msgid "Last used"
+msgstr ""

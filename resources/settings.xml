@@ -8,6 +8,26 @@
 					<default>true</default>
 					<control type="toggle"/>
 				</setting>
+				<setting help="" id="restorepriority" label="32039" type="string">
+                    <level>0</level>
+                    <default>video</default>
+                    <constraints>
+                        <options>
+                            <option label="32040">video</option>
+                            <option label="32041">music</option>
+                            <option label="32042">last_used</option>
+                        </options>
+                    </constraints>
+                    <control type="spinner" format="string"/>
+                    <dependencies>
+                        <dependency type="enable">
+                            <condition operator="is" setting="resumeonstartup">true</condition>
+                        </dependency>
+                        <dependency type="visible">
+                            <condition operator="is" setting="resumeonstartup">true</condition>
+                        </dependency>
+                    </dependencies>
+                </setting>
 				<setting help="" id="resumeifstopped" label="32006" type="boolean">
 					<level>0</level>
 					<default>false</default>

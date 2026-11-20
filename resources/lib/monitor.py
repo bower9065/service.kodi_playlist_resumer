@@ -10,6 +10,8 @@ class KodiEventMonitor(xbmc.Monitor):
         log('KodiEventMonitor __init__')
         
     def onSettingsChanged(self):
+        if self.abortRequested():
+            return
         log('onSettingsChanged - reload them.')
         Store.load_config_from_settings()
 
@@ -18,6 +20,8 @@ class KodiEventMonitor(xbmc.Monitor):
         log("Abort Requested")
 
     def onNotification(self, sender, method, data):
+        if self.abortRequested():
+            return
         if method in ("System.OnSleep", "System.OnSuspend"):
             log("Suspend detected")
             Store.just_suspend = True
@@ -26,6 +30,8 @@ class KodiEventMonitor(xbmc.Monitor):
             xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Playlist.Clear","params":{"playlistid":1},"id":"playlist_clear"}')
             log("Wake detected")
             Store.just_woke = True
+            if self.abortRequested():
+                return
             resumed_playback = Store.kodi_player.resume_if_was_playing()
-            if resumed_playback == False:
+            if resumed_playback == False and not self.abortRequested():
                 Store.kodi_player.autoplay_random_if_enabled()

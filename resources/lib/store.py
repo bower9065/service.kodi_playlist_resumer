@@ -1,6 +1,10 @@
 from .common import *
+from . import video_queue
 import os
 import json
+import time
+import tempfile
+import threading
 import xml.etree.ElementTree as ElementTree
 import xbmc
 
@@ -12,6 +16,9 @@ class Store:
     ignore_seconds_at_start = 180
     ignore_percent_at_end = 8
     resume_on_startup = False
+    restore_priority = "video"
+    state_file = ""
+    _state_lock = threading.RLock()
     autoplay_random = False
     kodi_event_monitor = None
     player_monitor = None
@@ -25,10 +32,6 @@ class Store:
     paused_time = None
     length_of_currently_playing_file = 0
     video_types_in_library = {'episodes': True, 'movies': True, 'musicvideos': True}
-    file_to_store_playlist_items = ''
-    file_to_store_resume_point = ''
-#    file_to_store_playlist_shuffled = ''
-    file_to_store_playlist_position = ''
     
     def __init__(self):
         """
@@ -37,9 +40,7 @@ class Store:
         Store.load_config_from_settings()
         if not os.path.exists(PROFILE):
             os.makedirs(PROFILE)
-        Store.file_to_store_playlist_items = os.path.join(PROFILE, "playlist items.txt")
-        Store.file_to_store_resume_point = os.path.join(PROFILE, "resume point.txt")
-        Store.file_to_store_playlist_position = os.path.join(PROFILE, "playlist position.txt")
+        Store.state_file = os.path.join(PROFILE, "resume data.json")
         advancedsettings_file = xbmcvfs.translatePath("special://profile/advancedsettings.xml")
         root = None
         try:
@@ -59,7 +60,7 @@ class Store:
         log(f"Using ignoresecondsatstart: {Store.ignore_seconds_at_start}, ignorepercentatend: {Store.ignore_percent_at_end}")
 
     @staticmethod
-    def clear_old_play_details():
+    def clear_old_play_details(keep_resume_snapshot=False):
         """
         As soon as a new file is played, clear out all old references to anything that was being stored as the currently playing file
         :return:
@@ -70,12 +71,9 @@ class Store:
         Store.type_of_video = None
         Store.paused_time = None
         Store.length_of_currently_playing_file = None
-        with open(Store.file_to_store_playlist_items, 'w+', encoding='utf-8') as f:
-            f.write('[]')
-        with open(Store.file_to_store_resume_point, 'w+') as f:
-            f.write('')
-        with open(Store.file_to_store_playlist_position, 'w+') as f:
-            f.write('')            
+        if not keep_resume_snapshot:
+            Store.update_state('video', {})
+
     @staticmethod
     def load_config_from_settings():
         """
@@ -86,6 +84,9 @@ class Store:
         Store.save_interval_seconds = int(float(ADDON.getSetting("saveintervalsecs")))
         Store.randomitems = int(get_setting("randomitems"))
         Store.resume_on_startup = get_setting_as_bool("resumeonstartup")
+        Store.restore_priority = get_setting("restorepriority").lower() or "video"
+        if Store.restore_priority not in ("video", "music", "last_used"):
+            Store.restore_priority = "video"
         Store.autoplay_random = get_setting_as_bool("autoplayrandom")   
         Store.random_delay = get_setting('random_delay')
         Store.resume_if_stopped = get_setting_as_bool("resumeifstopped")
@@ -97,7 +98,167 @@ class Store:
     def log_configuration():
         log(f'Will save a resume point every {Store.save_interval_seconds} seconds')
         log(f'Resume on startup: {Store.resume_on_startup}')
+        log(f'Restore priority: {Store.restore_priority}')
         log(f'Autoplay random video: {Store.autoplay_random}')
+
+    @staticmethod
+    def _read_state_file(path):
+        """Read a valid state file; callers decide when to try the backup."""
+        with open(path, 'r', encoding='utf-8') as handle:
+            state = json.load(handle)
+        if not isinstance(state, dict):
+            raise ValueError('state root is not a JSON object')
+        empty = {'version': 1, 'video': {}, 'music': None, 'last_used': None}
+        if not isinstance(state.get('video'), dict):
+            state['video'] = {}
+        return {**empty, **state}
+
+    @staticmethod
+    def read_state():
+        """Read the unified resume state, falling back to its last good backup."""
+        empty = {'version': 1, 'video': {}, 'music': None, 'last_used': None}
+        with Store._state_lock:
+            if not Store.state_file:
+                return empty
+            for candidate in (Store.state_file, Store.state_file + '.bak'):
+                try:
+                    state = Store._read_state_file(candidate)
+                    if candidate.endswith('.bak'):
+                        log('Recovered resume data from resume data.json.bak')
+                    return state
+                except FileNotFoundError:
+                    continue
+                except (OSError, ValueError, TypeError) as error:
+                    log('Could not read %s: %s' % (os.path.basename(candidate), error))
+            return empty
+
+    @staticmethod
+    def _write_state_file(destination, state):
+        """Commit indented JSON on the same filesystem with atomic replacement."""
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                    mode='w', encoding='utf-8', delete=False,
+                    dir=os.path.dirname(destination),
+                    prefix='.resume-data-', suffix='.tmp') as handle:
+                temporary = handle.name
+                json.dump(state, handle, ensure_ascii=False, indent=2)
+                handle.write('\n')
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+        finally:
+            if temporary and os.path.exists(temporary):
+                try:
+                    os.remove(temporary)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def update_state(section, value):
+        """Update one section atomically, backing up the previous good state.
+
+        Do not back up an unreadable primary; this preserves the last good
+        backup until a repaired primary is successfully written.
+        """
+        if section not in ('video', 'music', 'last_used') or not Store.state_file:
+            return False
+        with Store._state_lock:
+            state = Store.read_state()
+            if state.get(section) == value:
+                return False
+            destination = Store.state_file
+            # The backup is the *previous* valid snapshot, never a corrupt
+            # file and never the newly modified data being written.
+            try:
+                previous = Store._read_state_file(destination)
+            except (FileNotFoundError, OSError, ValueError, TypeError):
+                previous = None
+            if previous is not None:
+                try:
+                    Store._write_state_file(destination + '.bak', previous)
+                except OSError as error:
+                    log('Could not back up resume data.json: %s' % error)
+            state[section] = value
+            try:
+                Store._write_state_file(destination, state)
+                return True
+            except (OSError, TypeError, ValueError) as error:
+                log('Could not update resume data.json (%s): %s' % (section, error))
+                return False
+
+    @staticmethod
+    def get_video_snapshot():
+        return Store.read_state()['video']
+
+    @staticmethod
+    def update_video_snapshot(**fields):
+        with Store._state_lock:
+            video = Store.read_state()['video'].copy()
+            # updated_at is metadata: do not change it (or rewrite the large
+            # playlist) when the actual saved fields have not changed.
+            if all(video.get(key) == value for key, value in fields.items()):
+                return
+            video.update(fields)
+            video['updated_at'] = time.time()
+            Store.update_state('video', video)
+
+    @staticmethod
+    def get_music_snapshot():
+        return Store.read_state().get('music')
+
+    @staticmethod
+    def save_music_snapshot(snapshot):
+        with Store._state_lock:
+            previous = Store.get_music_snapshot()
+            if isinstance(snapshot, dict) and isinstance(previous, dict):
+                # A callback may capture the same song twice almost
+                # immediately. A sub-second time difference is not a new
+                # meaningful resume position; retain the last saved time.
+                new_core = {k: v for k, v in snapshot.items()
+                            if k not in ('seconds', 'updated_at')}
+                old_core = {k: v for k, v in previous.items()
+                            if k not in ('seconds', 'updated_at')}
+                try:
+                    unchanged_time = abs(float(snapshot.get('seconds', 0)) -
+                                         float(previous.get('seconds', 0))) < 1.0
+                except (TypeError, ValueError):
+                    unchanged_time = False
+                if new_core == old_core and unchanged_time:
+                    return
+            Store.update_state('music', snapshot)
+
+    @staticmethod
+    def clear_music_snapshot():
+        Store.update_state('music', None)
+
+    @staticmethod
+    def record_last_used_media(media):
+        if media not in ('music', 'video'):
+            return
+        with Store._state_lock:
+            marker = Store.read_state().get('last_used')
+            if isinstance(marker, dict) and marker.get('media') == media:
+                return
+            Store.update_state('last_used', {'media': media, 'timestamp': time.time()})
+        log(f'Last used playback type: {media}')
+
+    @staticmethod
+    def get_last_used_media():
+        """Choose last played type; on fresh installs use newest snapshot."""
+        state = Store.read_state()
+        marker = state.get('last_used')
+        if isinstance(marker, dict) and marker.get('media') in ('music', 'video'):
+            return marker['media']
+        candidates = []
+        for media in ('music', 'video'):
+            snapshot = state.get(media)
+            if isinstance(snapshot, dict) and snapshot:
+                timestamp = snapshot.get('updated_at', 0)
+                if not isinstance(timestamp, (int, float)):
+                    timestamp = 0
+                candidates.append((timestamp, media))
+        return max(candidates)[1] if candidates else 'video'
 
     @staticmethod
     def is_excluded(full_path):
@@ -139,7 +300,7 @@ class Store:
         """
         if Store.is_excluded(filepath):
             log("Skipping excluded filepath: " + filepath)
-            Store.currently_playing_file_path = None
+            Store.clear_old_play_details()
             return
         query = {
             "jsonrpc": "2.0",
@@ -166,6 +327,13 @@ class Store:
             Store.library_id = None
         log(f'Kodi type: {Store.type_of_video}, library id: {Store.library_id}')
         if Store.type_of_video in ['episode', 'movie', 'musicvideo']:
+            # A new video may have replaced an abandoned fast-start queue.
+            # Passing its actual ID lets the guard release for unrelated items.
+            current_identity = {Store.type_of_video + 'id': Store.library_id}
+            if video_queue.snapshots_blocked(current_identity):
+                log("Video queue is building; delaying snapshot write")
+                Store.currently_playing_file_path = None
+                return
             playlist_query = {
                 "jsonrpc": "2.0",
                 "method": "Playlist.GetItems",
@@ -183,23 +351,44 @@ class Store:
             }
             player_props = json.loads(xbmc.executeJSONRPC(json.dumps(player_query)))
             playlist_items = json.loads(xbmc.executeJSONRPC(json.dumps(playlist_query)))
-            final_position = max(0, player_props['result']['position'])
-            with open(Store.file_to_store_playlist_position, 'w', encoding='utf8') as f:
-                f.write(str(final_position))
+            # The player's numeric position is not a reliable identity: it
+            # can become stale when playback switches tracks or shuffle changes.
+            # Use the actual file's Kodi library ID to find its queue entry.
+            try:
+                reported_position = int(player_props['result']['position'])
+            except (KeyError, ValueError, TypeError):
+                reported_position = -1
             filtered = []
-            for item in playlist_items['result'].get('items', []):
-                if item["type"] == "movie":
-                    filtered.append({"movieid": item['id']})
-                elif item["type"] == "episode":
-                    filtered.append({"episodeid": item['id']})
-                elif item["type"] == "musicvideo":
-                    filtered.append({"musicvideoid": item['id']})
-            with open(Store.file_to_store_playlist_items, 'w', encoding='utf8') as f:
-                f.write(json.dumps(filtered))
+            for item in playlist_items.get('result', {}).get('items', []):
+                if item.get('type') in ('movie', 'episode', 'musicvideo') and isinstance(item.get('id'), int):
+                    filtered.append({item['type'] + 'id': item['id']})
+
+            current_item = {Store.type_of_video + 'id': Store.library_id}
+            matches = [i for i, item in enumerate(filtered) if item == current_item]
+            if not matches:
+                log(f"Refusing to save a mismatched resume queue: active={current_item}, "
+                    f"reported_position={reported_position}, saved_queue={len(filtered)}")
+                # Keep the last valid persisted snapshot until Kodi has a
+                # consistent queue; do not replace it with the wrong video.
+                Store.currently_playing_file_path = None
+                return
+
+            final_position = (reported_position if reported_position in matches
+                              else matches[0])
+            if final_position != reported_position:
+                log(f"Corrected stored playlist position from {reported_position} "
+                    f"to {final_position}, using currently playing ID {current_item}")
+
+            if video_queue.snapshots_blocked(current_item):
+                log("Video queue still building; keeping previous resume snapshot")
+                return
+            Store.update_video_snapshot(
+                items=filtered,
+                position=final_position,
+                resume_item={'item': current_item, 'file': filepath})
             Store.currently_playing_file_path = filepath
             log(f'Last played library file set to: {filepath}')
         else:
             Store.currently_playing_file_path = filepath
-            with open(Store.file_to_store_playlist_items, 'w', encoding='utf8') as f:
-                f.write(filepath)
+            Store.update_video_snapshot(items=filepath, position=0, resume_item=None)
             log(f'Last played file set to: {filepath}')
