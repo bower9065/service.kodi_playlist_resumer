@@ -214,3 +214,13 @@ def footprints(startup=True):
         log(f'Exiting...', level=xbmc.LOGINFO)
 
 
+
+
+def wait_preparing(monitor, allowed):
+    """Four-second interruptible notification window before preparation."""
+    import time
+    deadline = time.monotonic() + 4.0
+    while time.monotonic() < deadline:
+        if not allowed() or monitor.waitForAbort(min(0.25, max(0, deadline - time.monotonic()))):
+            return False
+    return allowed()

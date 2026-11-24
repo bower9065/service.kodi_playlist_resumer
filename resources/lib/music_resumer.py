@@ -9,7 +9,7 @@ import os
 import time
 
 import xbmc
-from .common import log, notify, xbmcgui
+from .common import log, notify, xbmcgui, wait_preparing
 from .store import Store
 
 
@@ -196,8 +196,8 @@ def has_snapshot():
     return isinstance(snapshot, dict) and bool(snapshot)
 
 
-def capture(player):
-    """Save full audio playlist, exact current song, index, and elapsed seconds."""
+def capture(player, periodic=False):
+    """Save full audio playlist, exact current song and index."""
     if (getattr(player, '_restoring_music', False) or not player.isPlayingAudio()
             or (Store.kodi_event_monitor and Store.kodi_event_monitor.abortRequested())):
         return False
@@ -209,6 +209,11 @@ def capture(player):
                             {'playerid': 0, 'properties': ['position', 'playlistid']})
         if props.get('playlistid') not in (None, 0):
             return False
+        signature = (active_file, props.get('position'), xbmc.PlayList(xbmc.PLAYLIST_MUSIC).size())
+        generation = getattr(player, '_music_queue_generation', 0)
+        if (periodic and getattr(player, '_music_capture_signature', None) == (signature, generation)
+                and time.monotonic() - getattr(player, '_music_full_capture', 0) < 60):
+            return True
         playlist_result = checked_rpc('Playlist.GetItems',
                                       {'playlistid': 0, 'properties': ['file']})
         items = playlist_result.get('items', [])
@@ -247,21 +252,23 @@ def capture(player):
             queue = [_as_queue_item(current) or {'file': active_file}]
             position = 0
 
-        seconds = max(0.0, float(player.getTime()))
+        seconds = 0
         snapshot = {'version': 2, 'items': queue, 'position': position,
                     'item': queue[position], 'file': active_file, 'seconds': seconds,
                     'paths': ([item.get('file') for item in items] if items
                               else [active_file])}
         snapshot['updated_at'] = time.time()
         Store.save_music_snapshot(snapshot)
+        player._music_capture_signature = (signature, generation)
+        player._music_full_capture = time.monotonic()
         return True
     except (ValueError, TypeError, RuntimeError, OSError, KeyError) as error:
         log('Music capture skipped: %s' % error)
         return False
 
 
-def restore(player, startup_started=None):
-    """Restore a full music queue, start at the saved item, then seek to time."""
+def restore(player, before_open=lambda: True):
+    """Restore a full music queue and start the saved song from the beginning."""
     if not Store.resume_on_startup or not has_snapshot() or player.isPlaying():
         return False
     try:
@@ -286,27 +293,13 @@ def restore(player, startup_started=None):
     monitor = Store.kodi_event_monitor or xbmc.Monitor()
     if monitor.abortRequested() or player.isPlaying():
         return False
-    delay = max(0, int(Store.resume_delay))
-    # Share ONE startup delay across music/video fallback. Waiting again after
-    # a video restore attempt makes music seem much slower than video.
-    if startup_started is None:
-        startup_started = time.monotonic()
-    remaining = max(0.0, delay - (time.monotonic() - startup_started))
-    if monitor.waitForAbort(max(remaining - 4.0, 0.0)):
-        return False
-    if xbmc.getGlobalIdleTime() < max(delay - 4, 0) or player.isPlaying():
-        log('Music restore canceled: Kodi was used during the startup delay')
-        return True  # suppress Auto Play Random when the user is active
-    remaining = max(0.0, delay - (time.monotonic() - startup_started))
-    if remaining > 0:
-        notify('Preparing to resume music playback...', xbmcgui.NOTIFICATION_INFO)
-    if monitor.waitForAbort(remaining):
-        return False
-    if xbmc.getGlobalIdleTime() < delay or player.isPlaying():
-        log('Music restore canceled: user activity detected')
-        return True
     log('Restoring music playlist: %d tracks, position %d' % (len(queue), position),
         level=xbmc.LOGINFO)
+    if not before_open():
+        return False
+    notify("Preparing to resume music playback...", xbmcgui.NOTIFICATION_INFO, 4000)
+    if not wait_preparing(monitor, before_open):
+        return False
     queue_started = time.monotonic()
     player._restoring_music = True
     try:
@@ -377,6 +370,8 @@ def restore(player, startup_started=None):
         # Kodi must not re-shuffle the saved order before selecting position.
         if monitor.abortRequested():
             return False
+        if not before_open():
+            return False
         notify('Resuming music playback...', xbmcgui.NOTIFICATION_INFO)
         phase_start = time.monotonic()
         log('Music timing: Player.Open START', level=xbmc.LOGINFO)
@@ -400,7 +395,7 @@ def restore(player, startup_started=None):
         if not matched and player.isPlayingAudio() and not monitor.abortRequested():
             # Kodi can open a saved music queue at the wrong index (or report
             # its previous track until the player catches up). Retry just once
-            # at the saved index; never seek in an unverified song.
+            # at the saved index; verify the correct song before completing restoration.
             log('Music restore: expected song not active; retrying saved index %s' %
                 position, level=xbmc.LOGINFO)
             try:
@@ -423,12 +418,7 @@ def restore(player, startup_started=None):
             return False
         if monitor.abortRequested():
             return False
-        try:
-            offset = max(0.0, seconds - int(Store.resume_offset))
-            if offset:
-                player.seekTime(offset)
-        except RuntimeError as error:
-            log('Music restore seek failed: %s' % error)
+        log('Music restore: starting saved song from beginning (no resume seek)', level=xbmc.LOGINFO)
         log('Music timing: saved song verified, total %.2fs since loading started' %
             (time.monotonic() - queue_started), level=xbmc.LOGINFO)
         log('Music restore: playlist and track verified')

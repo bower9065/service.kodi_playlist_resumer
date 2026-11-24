@@ -13,15 +13,13 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 import video_queue
+import library_cache
 
 addon = Addon()
 randomitems = addon.getSettingInt("randomitems")
 
-# Smart playlists can be expensive to enumerate, especially on large libraries.
-# Refresh this cache at most once every two minutes.  Kodi's regular library
-# selections (and the playback queue) are never cached.
-IGNORED_CACHE_SECONDS = 120
-PLAYLIST_ADD_BATCH_SIZE = 200
+# Smart playlist freshness uses the shared configurable cache lifetime.
+PLAYLIST_ADD_BATCH_SIZE = 500
 # This is a separate Kodi Python script, so it needs its own abort monitor.
 CONTEXT_MONITOR = xbmc.Monitor()
 
@@ -50,102 +48,93 @@ def close_busy_dialog():
     xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
 
 
-def add_playlist_items(items):
-    """Add a whole queue before playback; retry individually if a batch fails."""
-    for start in range(0, len(items), PLAYLIST_ADD_BATCH_SIZE):
-        if CONTEXT_MONITOR.abortRequested():
-            return False
-        batch = items[start:start + PLAYLIST_ADD_BATCH_SIZE]
-        result = safe_execute(build_jsonrpc("Playlist.Add", {
-            "playlistid": 1, "item": batch
-        }))
-        if "error" not in result and "result" in result:
-            continue
-        xbmc.log("Play Random: batch add failed; retrying items individually",
-                 xbmc.LOGWARNING)
-        for item in batch:
-            if CONTEXT_MONITOR.abortRequested():
-                return False
-            single = safe_execute(build_jsonrpc("Playlist.Add", {
-                "playlistid": 1, "item": item
-            }))
-            if "error" in single or "result" not in single:
-                xbmc.log(f"Play Random: failed to add item {item}: {single}",
-                         xbmc.LOGERROR)
-                return False
-    return True
-
-
-def start_playlist(items, selected_item=None):
+def start_playlist(items, selected_item=None, source="random-library"):
     """Queue everything before playback, with the clicked item first when given."""
     if selected_item:
         # Place the explicitly selected library item first, independently of
         # the random library query (which may contain the selected item too).
         items = [selected_item] + [item for item in items if item != selected_item]
+    items = list(items)[:max(1, randomitems)]
     if not items or CONTEXT_MONITOR.abortRequested():
         return False
     # Begin playback with the selected item immediately. Snapshot protection
     # lives in the service too, because context.py is a separate interpreter.
     started, complete = video_queue.start_queue(
-        items, batch_size=PLAYLIST_ADD_BATCH_SIZE, monitor=CONTEXT_MONITOR)
+        items, batch_size=PLAYLIST_ADD_BATCH_SIZE, monitor=CONTEXT_MONITOR, source=source, random_order=True)
     close_busy_dialog()
     if not complete:
         xbmc.log("Play Random: queue incomplete; previous saved resume retained",
                  xbmc.LOGWARNING)
     return started
 
-def collect_ignored_ids():
+def collect_ignored_ids(force=False, membership=None):
     """Map excluded (type, library id) to smart playlist, with short-lived cache."""
-    if not addon.getSettingBool("IgnoreSmartPlaylistItems") or CONTEXT_MONITOR.abortRequested():
+    if (not force and not addon.getSettingBool("IgnoreSmartPlaylistItems")) or CONTEXT_MONITOR.abortRequested():
         return {}
 
-    cache_file = None
+    cache_file = library_cache._paths()[1]
+    old = {}
     try:
-        profile = xbmcvfs.translatePath(addon.getAddonInfo("profile"))
-        cache_file = os.path.join(profile, "play_random_ignored_cache.json")
-        if (os.path.isfile(cache_file)
-                and time.time() - os.path.getmtime(cache_file) < IGNORED_CACHE_SECONDS):
-            with open(cache_file, "r", encoding="utf-8") as f:
-                rows = json.load(f)
-            return {(row[0], row[1]): row[2] for row in rows}
-    except (OSError, ValueError, TypeError, IndexError, KeyError) as error:
-        xbmc.log(f"Play Random cache read failed: {error}", xbmc.LOGWARNING)
-
-    ignored_map = {}
-    result = safe_execute(build_jsonrpc("Files.GetDirectory", {
-        "directory": "library://video/playlists/",
-        "properties": ["title"]
-    })).get("result", {}).get("files", [])
-
-    for pl in result:
-        if CONTEXT_MONITOR.abortRequested():
-            return ignored_map
-        playlist_path = pl.get("file")
-        if not playlist_path:
-            continue
-        items = safe_execute(build_jsonrpc("Files.GetDirectory", {
-            "directory": playlist_path,
-            "properties": ["title"]
-        })).get("result", {}).get("files", [])
-        for item in items:
-            if CONTEXT_MONITOR.abortRequested():
-                return ignored_map
-            item_type, item_id = item.get("type"), item.get("id")
-            if item_type and isinstance(item_id, int):
-                ignored_map[(item_type, item_id)] = playlist_path
-
-    if cache_file:
+        with open(cache_file, "r", encoding="utf-8") as f:
+            old = json.load(f)
+    except (OSError, ValueError, TypeError):
+        pass
+    def unpack(data):
         try:
-            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump([[kind, item_id, pl]
-                           for (kind, item_id), pl in ignored_map.items()],
-                          f, ensure_ascii=False, indent=2)
-                f.write('\n')
-        except (OSError, ValueError, TypeError) as error:
-            xbmc.log(f"Play Random cache write failed: {error}", xbmc.LOGWARNING)
-
-    return ignored_map
+            return {(row[0], row[1]): row[2] for row in (data.get("rows", []) if isinstance(data, dict) else data)}
+        except (TypeError, IndexError, KeyError):
+            return {}
+    previous = unpack(old)
+    generation = library_cache.smart_generation()
+    try:
+        response = safe_execute(build_jsonrpc("Files.GetDirectory", {
+            "directory": "library://video/playlists/", "properties": ["title"]}))
+        if "result" not in response:
+            raise RuntimeError("Could not enumerate smart playlists")
+        paths = sorted({pl.get("file") for pl in response["result"].get("files", [])
+                        if pl.get("file") and "kpr_xsp_metadata_test" not in pl["file"] and "kpr_internal_" not in pl["file"]})
+        fingerprint = []
+        for path in paths:
+            stat = xbmcvfs.Stat(path)
+            fingerprint.append([path, stat.st_mtime(), stat.st_size()])
+        if (not force and isinstance(old, dict) and old.get("generation") == generation
+                and old.get("fingerprint") == fingerprint
+                and isinstance(old.get("memberships"), dict)
+                and 0 <= time.time() - float(old.get("built_at", 0)) < library_cache.cache_max_age()):
+            if membership is not None:
+                membership.update(old["memberships"])
+            return previous
+        ignored_map = {}
+        memberships = {}
+        for path in paths:
+            if CONTEXT_MONITOR.abortRequested():
+                raise RuntimeError("Rebuild interrupted")
+            response = safe_execute(build_jsonrpc("Files.GetDirectory", {
+                "directory": path, "media": "video", "properties": ["title"]}))
+            if "result" not in response:
+                raise RuntimeError("Could not read smart playlist: " + path)
+            members = memberships.setdefault(path, [])
+            for item in response["result"].get("files", []):
+                kind, item_id = item.get("type"), item.get("id")
+                if kind in ("movie", "episode", "musicvideo") and type(item_id) is int:
+                    ignored_map[(kind, item_id)] = path
+                    members.append({"type": kind, "id": item_id})
+        if CONTEXT_MONITOR.abortRequested():
+            raise RuntimeError("Rebuild interrupted")
+        with library_cache.CacheLock(cache_file, monitor=CONTEXT_MONITOR, timeout=5) as acquired:
+            if not acquired:
+                raise RuntimeError("Smart cache busy")
+            library_cache._write(cache_file, {"built_at": time.time(), "generation": generation,
+                "fingerprint": fingerprint, "memberships": memberships, "rows": [[k, i, pl] for (k, i), pl in ignored_map.items()]})
+        xbmc.log("Play Random: smart-playlist cache rebuilt", xbmc.LOGINFO)
+        if membership is not None:
+            membership.update(memberships)
+        return ignored_map
+    except (OSError, ValueError, TypeError, RuntimeError) as error:
+        xbmc.log("Play Random smart cache rebuild failed; previous cache retained: " + str(error), xbmc.LOGWARNING)
+        if force:
+            raise
+        return previous
 
 
 def filter_items(items, item_type, ignored_ids, list_item, ignored_collector):
@@ -177,6 +166,14 @@ def fetch_and_filter(method, result_key, item_type, ignored_ids, list_item,
 
     if CONTEXT_MONITOR.abortRequested():
         return []
+    filters = params_extra or {}
+    cached = library_cache.select(
+        item_type, max_keep, ignored_ids=ignored_ids,
+        tvshowid=filters.get("tvshowid"), season=filters.get("season"),
+        monitor=CONTEXT_MONITOR)
+    if cached is not None:
+        return cached
+    # If initial cache creation failed, keep the original Kodi query path.
     result = safe_execute(build_jsonrpc(method, params)).get("result", {}).get(result_key, [])
     filtered = filter_items(result, item_type, ignored_ids, list_item, ignored_collector)
     return filtered[:max_keep]
@@ -198,7 +195,7 @@ def run_context_menu():
         tag = selected_list_item.getVideoInfoTag()
         tagged_type = tag.getMediaType()
         tagged_dbid = tag.getDbId()
-        if tagged_type in ("movie", "episode", "tvshow", "season") and tagged_dbid > 0:
+        if tagged_type in ("movie", "episode", "tvshow", "season", "musicvideo") and tagged_dbid > 0:
             db_type = tagged_type
             dbid = str(tagged_dbid)
     except (AttributeError, RuntimeError, TypeError, ValueError):
@@ -210,17 +207,20 @@ def run_context_menu():
 
     try:
         if path.startswith("videodb://") or (list_item_key and db_type in ("movie", "episode")):
-            ignored_ids = collect_ignored_ids()
+            library_cache.ensure_fresh(CONTEXT_MONITOR)
+            membership = {}
+            ignored_ids = collect_ignored_ids(membership=membership)
             ignored_collector = []
 
             # A selected item from a smart playlist should continue within
             # that smart playlist, as in the original implementation.
             if list_item_key in ignored_ids:
                 parent_playlist = ignored_ids[list_item_key]
-                content = safe_execute(build_jsonrpc("Files.GetDirectory", {
-                    "directory": parent_playlist,
-                    "properties": ["title"]
-                })).get("result", {}).get("files", [])
+                content = membership.get(parent_playlist)
+                if content is None:
+                    content = safe_execute(build_jsonrpc("Files.GetDirectory", {
+                        "directory": parent_playlist, "media": "video", "properties": ["title"]
+                    })).get("result", {}).get("files", [])
                 remaining, target_start_item = [], None
                 for item in content:
                     formatted_item = {f"{item['type']}id": item['id']}
@@ -231,7 +231,7 @@ def run_context_menu():
 
                 if target_start_item:
                     start_playlist([target_start_item] + remaining,
-                                   selected_item=target_start_item)
+                                   selected_item=target_start_item, source="smart-playlist: " + parent_playlist)
                 return
 
             if db_type == "movie":

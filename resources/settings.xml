@@ -1,325 +1,379 @@
-<?xml version="1.0" ?>
+<?xml version='1.0' encoding='utf-8'?>
 <settings version="1">
-	<section id="service.kodi_playlist_resumer">
-		<category help="" id="resumer" label="32000">
-			<group id="1">
-				<setting help="" id="resumeonstartup" label="32002" type="boolean">
-					<level>0</level>
-					<default>true</default>
-					<control type="toggle"/>
-				</setting>
-				<setting help="" id="restorepriority" label="32039" type="string">
-                    <level>0</level>
-                    <default>video</default>
-                    <constraints>
-                        <options>
-                            <option label="32040">video</option>
-                            <option label="32041">music</option>
-                            <option label="32042">last_used</option>
-                        </options>
-                    </constraints>
-                    <control type="spinner" format="string"/>
-                    <dependencies>
-                        <dependency type="enable">
-                            <condition operator="is" setting="resumeonstartup">true</condition>
-                        </dependency>
-                        <dependency type="visible">
-                            <condition operator="is" setting="resumeonstartup">true</condition>
-                        </dependency>
-                    </dependencies>
-                </setting>
-				<setting help="" id="resumeifstopped" label="32006" type="boolean">
-					<level>0</level>
-					<default>false</default>
-					<control type="toggle"/>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="resumeonstartup">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="resumeonstartup">true</condition>
-						</dependency>
-					</dependencies>
-				</setting>				
-				<setting help="" id="saveintervalsecs" label="32001" type="integer">
-					<level>0</level>
-					<default>10</default>
-					<constraints>
-						<minimum>5</minimum>
-						<maximum>600</maximum>
-					</constraints>
-					<control format="integer" type="slider">
-						<popup>false</popup>
-					</control>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="resumeonstartup">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="resumeonstartup">true</condition>
-						</dependency>
-					</dependencies>					
-				</setting>
-               <setting help="" id="resume_delay" label="32004" type="integer">
-                    <level>0</level>
-                    <default>12</default>
-                    <constraints>
-                        <minimum>7</minimum>
-                        <step>1</step>
-                        <maximum>60</maximum>
-                    </constraints>
-					<control type="slider" format="integer">
-                        <popup>false</popup>
-                    </control>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="resumeonstartup">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="resumeonstartup">true</condition>
-						</dependency>
-					</dependencies>					
-                </setting>	
-               <setting help="" id="resumeoffset" label="32005" type="integer">
-                    <level>0</level>
-                    <default>5</default>
-                    <constraints>
-                        <minimum>0</minimum>
-                        <step>1</step>
-                        <maximum>60</maximum>
-                    </constraints>
-					<control type="slider" format="integer">
-                        <popup>false</popup>
-                    </control>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="resumeonstartup">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="resumeonstartup">true</condition>
-						</dependency>
-					</dependencies>					
-                </setting>
-			</group>
-		</category>		
-		<category help="" id="ContextMenuItem" label="32035">			
-			<group id="1">				
-				<setting help="" id="AddContextMenuItem" label="32036" type="boolean">
-					<level>0</level>
-					<default>true</default>
-					<control type="toggle"/>
-				</setting>			
-				<setting help="" id="autoplayrandom" label="32003" type="boolean">
-					<level>0</level>
-					<default>false</default>
-					<control type="toggle"/>
-				</setting>
-				
-				<setting help="" id="randomitems" label="32038" type="integer">
-					<level>0</level>
-					<default>100</default>
-					<constraints>
-						<minimum>1</minimum>
-						<maximum>10000</maximum>
-					</constraints>
-					<control type="edit" format="integer" />
-					<dependencies>
-						<dependency type="enable">
-							<or>
-								<condition operator="is" setting="autoplayrandom">true</condition>
-								<condition operator="is" setting="AddContextMenuItem">true</condition>
-							</or>
-						</dependency>
-						<dependency type="visible">
-							<or>
-								<condition operator="is" setting="autoplayrandom">true</condition>
-								<condition operator="is" setting="AddContextMenuItem">true</condition>
-							</or>
-						</dependency>
-					</dependencies>
-				</setting>
-
-				
-               <setting help="" id="random_delay" label="32007" type="integer">
-                    <level>0</level>
-                    <default>60</default>
-                    <constraints>
-                        <minimum>5</minimum>
-                        <step>1</step>
-                        <maximum>300</maximum>
-                    </constraints>
-					<control type="slider" format="integer">
-                        <popup>false</popup>
-                    </control>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="autoplayrandom">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="autoplayrandom">true</condition>
-						</dependency>
-					</dependencies>				
-                </setting>				
-				<setting help="" id="randommovies" label="32008" type="boolean">
-					<level>0</level>
-					<default>true</default>
-					<control type="toggle"/>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="autoplayrandom">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="autoplayrandom">true</condition>
-						</dependency>
-					</dependencies>
-				</setting>		
-				<setting help="" id="randomtv" label="32009" type="boolean">
-					<level>0</level>
-					<default>false</default>
-					<control type="toggle"/>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="autoplayrandom">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="autoplayrandom">true</condition>
-						</dependency>
-					</dependencies>
-				</setting>		
-				<setting help="" id="randommusicvideos" label="32010" type="boolean">
-					<level>0</level>
-					<default>false</default>
-					<control type="toggle"/>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="autoplayrandom">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="autoplayrandom">true</condition>
-						</dependency>
-					</dependencies>
-				</setting>
-				
-			</group>								
-		</category>
-		
-		<category help="" id="exclude" label="32030">
-			<group id="1" label="32000">
-				<setting help="" id="ExcludeLiveTV" label="32031" type="boolean">
-					<level>0</level>
-					<default>false</default>
-					<control type="toggle"/>
-				</setting>
-				<setting help="" id="ExcludeHTTP" label="32032" type="boolean">
-					<level>0</level>
-					<default>false</default>
-					<control type="toggle"/>
-				</setting>
-				<setting help="" id="ExcludePathOption" label="32033" type="boolean">
-					<level>0</level>
-					<default>false</default>
-					<control type="toggle"/>
-				</setting>
-				<setting help="" id="ExcludePath" label="32034" type="path">
-					<level>0</level>
-					<default/>
-					<constraints>
-						<sources>
-							<source>video</source>
-						</sources>
-						<writable>false</writable>
-						<allowempty>true</allowempty>
-					</constraints>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="ExcludePathOption">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="ExcludePathOption">true</condition>
-						</dependency>
-					</dependencies>
-					<control format="path" type="button">
-						<heading>32034</heading>
-					</control>
-				</setting>
-				<setting help="" id="ExcludePathOption2" label="32033" type="boolean">
-					<level>0</level>
-					<default>false</default>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="ExcludePathOption">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="ExcludePathOption">true</condition>
-						</dependency>
-					</dependencies>
-					<control type="toggle"/>
-				</setting>
-				<setting help="" id="ExcludePath2" label="32034" type="path">
-					<level>0</level>
-					<default/>
-					<constraints>
-						<sources>
-							<source>video</source>
-						</sources>
-						<writable>false</writable>
-						<allowempty>true</allowempty>
-					</constraints>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="ExcludePathOption2">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="ExcludePathOption2">true</condition>
-						</dependency>
-					</dependencies>
-					<control format="path" type="button">
-						<heading>32034</heading>
-					</control>
-				</setting>
-				<setting help="" id="ExcludePathOption3" label="32033" type="boolean">
-					<level>0</level>
-					<default>false</default>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="ExcludePathOption2">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="ExcludePathOption2">true</condition>
-						</dependency>
-					</dependencies>
-					<control type="toggle"/>
-				</setting>
-				<setting help="" id="ExcludePath3" label="32034" type="path">
-					<level>0</level>
-					<default/>
-					<constraints>
-						<sources>
-							<source>video</source>
-						</sources>
-						<writable>false</writable>
-						<allowempty>true</allowempty>
-					</constraints>
-					<dependencies>
-						<dependency type="enable">
-							<condition operator="is" setting="ExcludePathOption3">true</condition>
-						</dependency>
-						<dependency type="visible">
-							<condition operator="is" setting="ExcludePathOption3">true</condition>
-						</dependency>
-					</dependencies>
-					<control format="path" type="button">
-						<heading>32034</heading>
-					</control>
-				</setting>
-			</group>
-			<group id="2" label="32100">
-				<setting help="" id="IgnoreSmartPlaylistItems" label="32037" type="boolean">
-					<level>0</level>
-					<default>true</default>
-					<control type="toggle"/>
-				</setting>			
-			</group>
-		</category>
-	</section>
+  <section id="service.kodi_playlist_resumer">
+    <category help="" id="resumer" label="32000">
+      <group id="1">
+        <setting help="32200" id="resumeonstartup" label="32002" type="boolean">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle" />
+        </setting>
+        <setting help="32201" id="restorepriority" label="32039" type="string">
+          <level>0</level>
+          <default>video</default>
+          <constraints>
+            <options>
+              <option label="32040">video</option>
+              <option label="32041">music</option>
+              <option label="32042">last_used</option>
+            </options>
+          </constraints>
+          <control type="spinner" format="string" />
+          <dependencies>
+            <dependency type="enable">
+              <condition operator="is" setting="resumeonstartup">true</condition>
+            </dependency>
+            <dependency type="visible">
+              <condition operator="is" setting="resumeonstartup">true</condition>
+            </dependency>
+          </dependencies>
+        </setting>
+        <setting help="32202" id="resumeifstopped" label="32006" type="boolean">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle" />
+          <dependencies>
+            <dependency type="enable">
+              <condition operator="is" setting="resumeonstartup">true</condition>
+            </dependency>
+            <dependency type="visible">
+              <condition operator="is" setting="resumeonstartup">true</condition>
+            </dependency>
+          </dependencies>
+        </setting>
+        <setting help="32203" id="saveintervalsecs" label="32001" type="integer">
+          <level>0</level>
+          <default>15</default>
+          <constraints>
+            <minimum>5</minimum>
+            <maximum>600</maximum>
+          </constraints>
+          <control format="integer" type="slider">
+            <popup>false</popup>
+          </control>
+          <dependencies>
+            <dependency type="enable">
+              <condition operator="is" setting="resumeonstartup">true</condition>
+            </dependency>
+            <dependency type="visible">
+              <condition operator="is" setting="resumeonstartup">true</condition>
+            </dependency>
+          </dependencies>
+        </setting>
+        <setting help="32204" id="resumeoffset" label="32005" type="integer">
+          <level>0</level>
+          <default>5</default>
+          <constraints>
+            <minimum>0</minimum>
+            <step>1</step>
+            <maximum>60</maximum>
+          </constraints>
+          <control type="slider" format="integer">
+            <popup>false</popup>
+          </control>
+          <dependencies>
+            <dependency type="enable">
+              <condition operator="is" setting="resumeonstartup">true</condition>
+            </dependency>
+            <dependency type="visible">
+              <condition operator="is" setting="resumeonstartup">true</condition>
+            </dependency>
+          </dependencies>
+        </setting>
+        <setting help="32205" id="autoplayrandom" label="32003" type="boolean">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle" />
+        </setting>
+        <setting help="32206" id="resume_delay" label="32004" type="integer">
+          <level>0</level>
+          <default>12</default>
+          <constraints>
+            <minimum>7</minimum>
+            <step>1</step>
+            <maximum>60</maximum>
+          </constraints>
+          <control type="slider" format="integer">
+            <popup>false</popup>
+          </control>
+          <dependencies>
+            <dependency type="enable">
+              <or>
+                <condition operator="is" setting="resumeonstartup">true</condition>
+                <condition operator="is" setting="autoplayrandom">true</condition>
+              </or>
+            </dependency>
+            <dependency type="visible">
+              <or>
+                <condition operator="is" setting="resumeonstartup">true</condition>
+                <condition operator="is" setting="autoplayrandom">true</condition>
+              </or>
+            </dependency>
+          </dependencies>
+        </setting>
+      </group>
+    </category>
+    <category help="" id="ContextMenuItem" label="32035">
+      <group id="1">
+        <setting help="32207" id="AddContextMenuItem" label="32036" type="boolean">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle" />
+        </setting>
+        <setting help="32208" id="autoplay_queue_completion" label="32047" type="boolean">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle" />
+        </setting>
+        <setting help="32209" id="queue_completion_delay" label="32048" type="integer">
+          <level>0</level>
+          <default>12</default>
+          <constraints>
+            <minimum>5</minimum>
+            <step>1</step>
+            <maximum>300</maximum>
+          </constraints>
+          <control type="slider" format="integer">
+            <popup>false</popup>
+          </control>
+          <dependencies>
+            <dependency type="enable">
+              <condition operator="is" setting="autoplay_queue_completion">true</condition>
+            </dependency>
+            <dependency type="visible">
+              <condition operator="is" setting="autoplay_queue_completion">true</condition>
+            </dependency>
+          </dependencies>
+        </setting>
+      </group>
+      <group id="2" label="32049">
+        <setting help="32210" id="randomitems" label="32038" type="integer">
+          <level>0</level>
+          <default>2000</default>
+          <constraints>
+            <minimum>1</minimum>
+            <maximum>10000</maximum>
+          </constraints>
+          <control type="edit" format="integer" />
+          <dependencies>
+            <dependency type="enable">
+              <or>
+                <condition operator="is" setting="autoplayrandom">true</condition>
+                <condition operator="is" setting="AddContextMenuItem">true</condition>
+                <condition operator="is" setting="autoplay_queue_completion">true</condition>
+              </or>
+            </dependency>
+            <dependency type="visible">
+              <or>
+                <condition operator="is" setting="autoplayrandom">true</condition>
+                <condition operator="is" setting="AddContextMenuItem">true</condition>
+                <condition operator="is" setting="autoplay_queue_completion">true</condition>
+              </or>
+            </dependency>
+          </dependencies>
+        </setting>
+        <setting help="32211" id="randommovies" label="32008" type="boolean">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle" />
+          <dependencies>
+            <dependency type="enable">
+              <or>
+                <condition operator="is" setting="autoplayrandom">true</condition>
+                <condition operator="is" setting="autoplay_queue_completion">true</condition>
+              </or>
+            </dependency>
+            <dependency type="visible">
+              <or>
+                <condition operator="is" setting="autoplayrandom">true</condition>
+                <condition operator="is" setting="autoplay_queue_completion">true</condition>
+              </or>
+            </dependency>
+          </dependencies>
+        </setting>
+        <setting help="32212" id="randomtv" label="32009" type="boolean">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle" />
+          <dependencies>
+            <dependency type="enable">
+              <or>
+                <condition operator="is" setting="autoplayrandom">true</condition>
+                <condition operator="is" setting="autoplay_queue_completion">true</condition>
+              </or>
+            </dependency>
+            <dependency type="visible">
+              <or>
+                <condition operator="is" setting="autoplayrandom">true</condition>
+                <condition operator="is" setting="autoplay_queue_completion">true</condition>
+              </or>
+            </dependency>
+          </dependencies>
+        </setting>
+        <setting help="32213" id="randommusicvideos" label="32010" type="boolean">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle" />
+          <dependencies>
+            <dependency type="enable">
+              <or>
+                <condition operator="is" setting="autoplayrandom">true</condition>
+                <condition operator="is" setting="autoplay_queue_completion">true</condition>
+              </or>
+            </dependency>
+            <dependency type="visible">
+              <or>
+                <condition operator="is" setting="autoplayrandom">true</condition>
+                <condition operator="is" setting="autoplay_queue_completion">true</condition>
+              </or>
+            </dependency>
+          </dependencies>
+        </setting>
+      </group>
+    </category>
+    <category help="" id="exclude" label="32030">
+      <group id="1" label="32000">
+        <setting help="32214" id="ExcludeLiveTV" label="32031" type="boolean">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle" />
+        </setting>
+        <setting help="32215" id="ExcludeHTTP" label="32032" type="boolean">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle" />
+        </setting>
+        <setting help="32216" id="ExcludePathOption" label="32033" type="boolean">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle" />
+        </setting>
+        <setting help="32217" id="ExcludePath" label="32034" type="path">
+          <level>0</level>
+          <default />
+          <constraints>
+            <sources>
+              <source>video</source>
+            </sources>
+            <writable>false</writable>
+            <allowempty>true</allowempty>
+          </constraints>
+          <dependencies>
+            <dependency type="enable">
+              <condition operator="is" setting="ExcludePathOption">true</condition>
+            </dependency>
+            <dependency type="visible">
+              <condition operator="is" setting="ExcludePathOption">true</condition>
+            </dependency>
+          </dependencies>
+          <control format="path" type="button">
+            <heading>32034</heading>
+          </control>
+        </setting>
+        <setting help="32218" id="ExcludePathOption2" label="32033" type="boolean">
+          <level>0</level>
+          <default>false</default>
+          <dependencies>
+            <dependency type="enable">
+              <condition operator="is" setting="ExcludePathOption">true</condition>
+            </dependency>
+            <dependency type="visible">
+              <condition operator="is" setting="ExcludePathOption">true</condition>
+            </dependency>
+          </dependencies>
+          <control type="toggle" />
+        </setting>
+        <setting help="32219" id="ExcludePath2" label="32034" type="path">
+          <level>0</level>
+          <default />
+          <constraints>
+            <sources>
+              <source>video</source>
+            </sources>
+            <writable>false</writable>
+            <allowempty>true</allowempty>
+          </constraints>
+          <dependencies>
+            <dependency type="enable">
+              <condition operator="is" setting="ExcludePathOption2">true</condition>
+            </dependency>
+            <dependency type="visible">
+              <condition operator="is" setting="ExcludePathOption2">true</condition>
+            </dependency>
+          </dependencies>
+          <control format="path" type="button">
+            <heading>32034</heading>
+          </control>
+        </setting>
+        <setting help="32220" id="ExcludePathOption3" label="32033" type="boolean">
+          <level>0</level>
+          <default>false</default>
+          <dependencies>
+            <dependency type="enable">
+              <condition operator="is" setting="ExcludePathOption2">true</condition>
+            </dependency>
+            <dependency type="visible">
+              <condition operator="is" setting="ExcludePathOption2">true</condition>
+            </dependency>
+          </dependencies>
+          <control type="toggle" />
+        </setting>
+        <setting help="32221" id="ExcludePath3" label="32034" type="path">
+          <level>0</level>
+          <default />
+          <constraints>
+            <sources>
+              <source>video</source>
+            </sources>
+            <writable>false</writable>
+            <allowempty>true</allowempty>
+          </constraints>
+          <dependencies>
+            <dependency type="enable">
+              <condition operator="is" setting="ExcludePathOption3">true</condition>
+            </dependency>
+            <dependency type="visible">
+              <condition operator="is" setting="ExcludePathOption3">true</condition>
+            </dependency>
+          </dependencies>
+          <control format="path" type="button">
+            <heading>32034</heading>
+          </control>
+        </setting>
+      </group>
+      <group id="2" label="32100">
+        <setting help="32222" id="IgnoreSmartPlaylistItems" label="32037" type="boolean">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle" />
+        </setting>
+      </group>
+    </category>
+    <category help="" id="playlistcache" label="32045">
+      <group id="4">
+        <setting help="32223" id="cache_lifetime_hours" label="32046" type="integer">
+          <level>0</level>
+          <default>24</default>
+          <constraints>
+            <minimum>1</minimum>
+            <maximum>24</maximum>
+            <step>1</step>
+          </constraints>
+          <control type="slider" format="integer">
+            <popup>false</popup>
+          </control>
+        </setting>
+        <setting help="32224" id="rebuild_library_cache" label="32043" type="action">
+          <level>0</level>
+          <data>RunScript(service.kodi_playlist_resumer,rebuild_library_cache)</data>
+          <control type="button" format="action" />
+        </setting>
+        <setting help="32225" id="rebuild_ignored_cache" label="32044" type="action">
+          <level>0</level>
+          <data>RunScript(service.kodi_playlist_resumer,rebuild_ignored_cache)</data>
+          <control type="button" format="action" />
+        </setting>
+      </group>
+    </category>
+  </section>
 </settings>

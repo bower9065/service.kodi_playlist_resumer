@@ -28,100 +28,239 @@ msgstr ""
 
 msgctxt "#32000"
 msgid "Resumer"
-msgstr ""
+msgstr "Resumer"
 
 msgctxt "#32001"
-msgid " ∟Save resume point every X seconds"
-msgstr ""
+msgid " ∟Save resume point interval (Seconds)"
+msgstr " ∟Save resume point interval (Seconds)"
 
 msgctxt "#32002"
 msgid "Auto-Resume playback at startup"
-msgstr ""
+msgstr "Auto-Resume playback at startup"
 
 msgctxt "#32003"
-msgid "Auto-Play a random video if nothing is playing"
-msgstr ""
+msgid "Auto-Play random videos if nothing to resume"
+msgstr "Auto-Play random videos if nothing to resume"
 
 msgctxt "#32006"
 msgid " ∟Resume even if stopped"
-msgstr ""
-
-msgctxt "#32007"
-msgid " ∟Delay auto play random seconds"
-msgstr ""
+msgstr " ∟Resume even if stopped"
 
 msgctxt "#32030"
 msgid "Exclude"
-msgstr ""
+msgstr "Exclude"
 
 msgctxt "#32031"
 msgid "Exclude Live TV"
-msgstr ""
+msgstr "Exclude Live TV"
 
 msgctxt "#32032"
 msgid "Exclude HTTP sources"
-msgstr ""
+msgstr "Exclude HTTP sources"
 
 msgctxt "#32033"
 msgid "Exclude path"
-msgstr ""
+msgstr "Exclude path"
 
 msgctxt "#32034"
 msgid "Folder's path (and subfolders)"
-msgstr ""
+msgstr "Folder's path (and subfolders)"
 
 msgctxt "#32004"
-msgid " ∟Delay resume on start seconds"
-msgstr ""
+msgid "Delay playback on startup (Seconds)"
+msgstr "Delay playback on startup (Seconds)"
 
 msgctxt "#32005"
-msgid " ∟Resume point offset seconds"
-msgstr ""
+msgid " ∟Resume point offset (Seconds)"
+msgstr " ∟Resume point offset (Seconds)"
 
 msgctxt "#32008"
-msgid " ∟Include Movies"
-msgstr ""
+msgid "Include Movies"
+msgstr "Include Movies"
 
 msgctxt "#32009"
-msgid " ∟Include TV Shows"
-msgstr ""
+msgid "Include TV Shows"
+msgstr "Include TV Shows"
 
 msgctxt "#32010"
-msgid " ∟Include Music Videos"
-msgstr ""
+msgid "Include Music Videos"
+msgstr "Include Music Videos"
 
 msgctxt "#32100"
 msgid "Play random"
-msgstr ""
+msgstr "Play random"
 
 msgctxt "#32035"
 msgid "Play Random"
-msgstr ""
+msgstr "Play Random"
 
 msgctxt "#32036"
 msgid "Add (Play Random) to Context Menu"
-msgstr ""
+msgstr "Add (Play Random) to Context Menu"
 
 msgctxt "#32037"
 msgid "Exclude items that are associated with smart playlists"
-msgstr ""
+msgstr "Exclude items that are associated with smart playlists"
 
 msgctxt "#32038"
-msgid " ∟Number of library items to retrieve"
-msgstr ""
+msgid "Number of library items to retrieve"
+msgstr "Number of library items to retrieve"
 
 msgctxt "#32039"
 msgid "∟Resume Priority"
-msgstr ""
+msgstr "∟Resume Priority"
 
 msgctxt "#32040"
 msgid "Video"
-msgstr ""
+msgstr "Video"
 
 msgctxt "#32041"
 msgid "Music"
-msgstr ""
+msgstr "Music"
 
 msgctxt "#32042"
 msgid "Last used"
-msgstr ""
+msgstr "Last used"
+
+msgctxt "#32043"
+msgid "Rebuild Library Items Cache"
+msgstr "Rebuild Library Items Cache"
+
+msgctxt "#32110"
+msgid "Experiment: Use VideoDB URLs in movie M3U (auto-fallback)"
+msgstr "Experiment: Use VideoDB URLs in movie M3U (auto-fallback)"
+
+msgctxt "#32111"
+msgid "Experimental. Movie-only queues use virtual Kodi library URLs; if IDs are missing, automatically reload using file paths. Details saved in add-on profile."
+msgstr "Experimental. Movie-only queues use virtual Kodi library URLs; if IDs are missing, automatically reload using file paths. Details saved in add-on profile."
+
+
+
+msgctxt "#32044"
+msgid "Rebuild Smart Playlist Items Cache"
+msgstr "Rebuild Smart Playlist Items Cache"
+
+msgctxt "#32045"
+msgid "Caching"
+msgstr "Caching"
+
+msgctxt "#32046"
+msgid "Cache Duration (Hours)"
+msgstr "Cache Duration (Hours)"
+
+
+msgctxt "#32047"
+msgid "Auto-Play Random videos on queue completion"
+msgstr "Auto-Play Random videos on queue completion"
+
+msgctxt "#32048"
+msgid "∟Delay on queue completion (Seconds)"
+msgstr "∟Delay on queue completion (Seconds)"
+
+msgctxt "#32049"
+msgid "Includes"
+msgstr "Includes"
+
+msgctxt "#32200"
+msgid "Automatically restore saved video or music playback when Kodi starts or wakes from sleep."
+msgstr "Automatically restore saved video or music playback when Kodi starts or wakes from sleep."
+
+msgctxt "#32201"
+msgid "Choose which saved playback to restore first when both video and music are available: video, music, or the most recently used media type."
+msgstr "Choose which saved playback to restore first when both video and music are available: video, music, or the most recently used media type."
+
+msgctxt "#32202"
+msgid "Keep the resume point when playback is manually stopped so it can be restored later."
+msgstr "Keep the resume point when playback is manually stopped so it can be restored later."
+
+msgctxt "#32203"
+msgid "How often to save the current playback position and playlist while media is playing."
+msgstr "How often to save the current playback position and playlist while media is playing."
+
+msgctxt "#32204"
+msgid "Rewind by this many seconds from the saved video playback position when resuming. Music always resumes from the beginning of the saved song."
+msgstr "Rewind by this many seconds from the saved video playback position when resuming. Music always resumes from the beginning of the saved song."
+
+msgctxt "#32205"
+msgid "Start a random video playlist after the startup delay if there is no eligible saved playback to resume, provided Kodi remains idle and nothing else is playing."
+msgstr "Start a random video playlist after the startup delay if there is no eligible saved playback to resume, provided Kodi remains idle and nothing else is playing."
+
+msgctxt "#32206"
+msgid "Wait this many seconds after startup or wake before checking whether to resume playback or start random videos. User activity cancels automatic playback."
+msgstr "Wait this many seconds after startup or wake before checking whether to resume playback or start random videos. User activity cancels automatic playback."
+
+msgctxt "#32207"
+msgid "Show the Play Random action in the context menu for supported video library items."
+msgstr "Show the Play Random action in the context menu for supported video library items."
+
+msgctxt "#32208"
+msgid "Start a new random video playlist when the current video queue finishes naturally and nothing else is playing. Manual stops do not trigger this action."
+msgstr "Start a new random video playlist when the current video queue finishes naturally and nothing else is playing. Manual stops do not trigger this action."
+
+msgctxt "#32209"
+msgid "Wait this many seconds after natural queue completion before preparing a new random playlist. User activity or new playback cancels the countdown."
+msgstr "Wait this many seconds after natural queue completion before preparing a new random playlist. User activity or new playback cancels the countdown."
+
+msgctxt "#32210"
+msgid "Set the target number of library items to retrieve for random playback (up to 10000). Missing or excluded items may reduce the final count. Saved video playlists are restored independently of this setting."
+msgstr "Set the target number of library items to retrieve for random playback (up to 10000). Missing or excluded items may reduce the final count. Saved video playlists are restored independently of this setting."
+
+msgctxt "#32211"
+msgid "Allow movies to be selected for automatic random video playback."
+msgstr "Allow movies to be selected for automatic random video playback."
+
+msgctxt "#32212"
+msgid "Allow TV episodes to be selected for automatic random video playback."
+msgstr "Allow TV episodes to be selected for automatic random video playback."
+
+msgctxt "#32213"
+msgid "Allow music videos to be selected for automatic random video playback."
+msgstr "Allow music videos to be selected for automatic random video playback."
+
+msgctxt "#32214"
+msgid "Do not save playback from Live TV (PVR) sources for automatic resumption."
+msgstr "Do not save playback from Live TV (PVR) sources for automatic resumption."
+
+msgctxt "#32215"
+msgid "Do not save playback from HTTP or HTTPS sources for automatic resumption."
+msgstr "Do not save playback from HTTP or HTTPS sources for automatic resumption."
+
+msgctxt "#32216"
+msgid "Enable excluded folder 1 to prevent matching media from being saved for automatic resumption."
+msgstr "Enable excluded folder 1 to prevent matching media from being saved for automatic resumption."
+
+msgctxt "#32217"
+msgid "Select excluded folder 1. Playback from this folder and its subfolders will not be saved for automatic resumption."
+msgstr "Select excluded folder 1. Playback from this folder and its subfolders will not be saved for automatic resumption."
+
+msgctxt "#32218"
+msgid "Enable excluded folder 2 to prevent matching media from being saved for automatic resumption."
+msgstr "Enable excluded folder 2 to prevent matching media from being saved for automatic resumption."
+
+msgctxt "#32219"
+msgid "Select excluded folder 2. Playback from this folder and its subfolders will not be saved for automatic resumption."
+msgstr "Select excluded folder 2. Playback from this folder and its subfolders will not be saved for automatic resumption."
+
+msgctxt "#32220"
+msgid "Enable excluded folder 3 to prevent matching media from being saved for automatic resumption."
+msgstr "Enable excluded folder 3 to prevent matching media from being saved for automatic resumption."
+
+msgctxt "#32221"
+msgid "Select excluded folder 3. Playback from this folder and its subfolders will not be saved for automatic resumption."
+msgstr "Select excluded folder 3. Playback from this folder and its subfolders will not be saved for automatic resumption."
+
+msgctxt "#32222"
+msgid "Exclude videos associated with smart playlists from general random selection. Context-menu playback can use the selected item’s smart-playlist membership."
+msgstr "Exclude videos associated with smart playlists from general random selection. Context-menu playback can use the selected item’s smart-playlist membership."
+
+msgctxt "#32223"
+msgid "Maximum age of both caches in hours. Expired caches are rebuilt when needed for random playback, rather than periodically or simply at startup or wake."
+msgstr "Maximum age of both caches in hours. Expired caches are rebuilt when needed for random playback, rather than periodically or simply at startup or wake."
+
+msgctxt "#32224"
+msgid "Manually refresh cached video library IDs and file paths without waiting for the cache to expire."
+msgstr "Manually refresh cached video library IDs and file paths without waiting for the cache to expire."
+
+msgctxt "#32225"
+msgid "Manually refresh cached smart-playlist memberships and exclusions without waiting for the cache to expire."
+msgstr "Manually refresh cached smart-playlist memberships and exclusions without waiting for the cache to expire."

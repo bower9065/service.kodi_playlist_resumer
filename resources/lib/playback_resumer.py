@@ -4,6 +4,7 @@ import xbmc
 import time
 from .monitor import KodiEventMonitor
 from .player import KodiPlayer
+from . import library_cache
 
 def run():
     """
@@ -11,25 +12,26 @@ def run():
 
     :return:
     """
+    idle_started = (time.monotonic(), xbmc.getGlobalIdleTime())
     footprints()
     config = Store()
     Store.kodi_event_monitor = KodiEventMonitor()
     Store.kodi_player = KodiPlayer(xbmc.Player)
+    cache_worker = library_cache.BackgroundCacheWorker(Store.kodi_event_monitor)
+    Store.kodi_event_monitor.library_cache_worker = cache_worker
+    # The worker is attached now to record any library changes, but do not
+    # launch expensive cache queries until Kodi has finished startup restore.
 
     if Store.kodi_event_monitor.abortRequested():
         footprints(False)
         return
-    resumed_playback = Store.kodi_player.resume_if_was_playing()
-    
-    if Store.was_trailer:
-        log("A trailer just finished playing. Blocking autoplay_random and resetting state.")
-        Store.was_trailer = False
-        resumed_playback = True
-        
-    if (resumed_playback == False and not Store.kodi_event_monitor.abortRequested()
-            and not Store.kodi_player.isPlaying()):
-        Store.kodi_player.autoplay_random_if_enabled()
-        
+    Store.kodi_player.startup_playback(idle_started=idle_started)
+
+    # The cache is an optimization: startup resume and Auto Play Random take
+    # priority over its initial database queries.
+    if not Store.kodi_event_monitor.abortRequested():
+        cache_worker.start()
+
     next_music_capture = 0
     while not Store.kodi_event_monitor.abortRequested():
         if Store.kodi_event_monitor.waitForAbort(1):

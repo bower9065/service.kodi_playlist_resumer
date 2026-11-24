@@ -12,14 +12,16 @@ class Store:
     """
     Helper class to read in and store the addon settings, and to provide a centralised store
     """
-    save_interval_seconds = 30
+    save_interval_seconds = 15
     ignore_seconds_at_start = 180
     ignore_percent_at_end = 8
     resume_on_startup = False
     restore_priority = "video"
     state_file = ""
     _state_lock = threading.RLock()
-    autoplay_random = False
+    autoplay_random = True
+    autoplay_queue_completion = True
+    queue_completion_delay = 12
     kodi_event_monitor = None
     player_monitor = None
     just_woke = False
@@ -88,7 +90,8 @@ class Store:
         if Store.restore_priority not in ("video", "music", "last_used"):
             Store.restore_priority = "video"
         Store.autoplay_random = get_setting_as_bool("autoplayrandom")   
-        Store.random_delay = get_setting('random_delay')
+        Store.autoplay_queue_completion = get_setting_as_bool('autoplay_queue_completion')
+        Store.queue_completion_delay = get_setting('queue_completion_delay')
         Store.resume_if_stopped = get_setting_as_bool("resumeifstopped")
         Store.resume_delay = get_setting('resume_delay')
         Store.resume_offset = get_setting('resumeoffset')      
@@ -155,7 +158,7 @@ class Store:
                     pass
 
     @staticmethod
-    def update_state(section, value):
+    def update_state(section, value, last_media=None):
         """Update one section atomically, backing up the previous good state.
 
         Do not back up an unreadable primary; this preserves the last good
@@ -164,28 +167,46 @@ class Store:
         if section not in ('video', 'music', 'last_used') or not Store.state_file:
             return False
         with Store._state_lock:
-            state = Store.read_state()
-            if state.get(section) == value:
-                return False
             destination = Store.state_file
-            # The backup is the *previous* valid snapshot, never a corrupt
-            # file and never the newly modified data being written.
             try:
                 previous = Store._read_state_file(destination)
             except (FileNotFoundError, OSError, ValueError, TypeError):
                 previous = None
+            state = (previous.copy() if previous is not None else Store.read_state())
+            marker = state.get('last_used')
+            media_changed = last_media and (not isinstance(marker, dict) or marker.get('media') != last_media)
+            if state.get(section) == value and not media_changed:
+                return False
             if previous is not None:
                 try:
                     Store._write_state_file(destination + '.bak', previous)
                 except OSError as error:
                     log('Could not back up resume data.json: %s' % error)
             state[section] = value
+            if media_changed:
+                state["last_used"] = {"media": last_media, "timestamp": time.time()}
             try:
                 Store._write_state_file(destination, state)
                 return True
             except (OSError, TypeError, ValueError) as error:
                 log('Could not update resume data.json (%s): %s' % (section, error))
                 return False
+
+    @staticmethod
+    def has_saved_resume_snapshot():
+        """Whether a viable saved queue exists that startup should preserve.
+
+        If restoration fails (for example a missing media path), Auto Play
+        Random must not overwrite that saved queue before the user can retry.
+        """
+        state = Store.read_state()
+        for kind in ('video', 'music'):
+            snapshot = state.get(kind)
+            if (isinstance(snapshot, dict) and snapshot.get('items')
+                    and snapshot.get('position') is not None
+                    and snapshot.get('seconds') is not None):
+                return True
+        return False
 
     @staticmethod
     def get_video_snapshot():
@@ -212,21 +233,11 @@ class Store:
         with Store._state_lock:
             previous = Store.get_music_snapshot()
             if isinstance(snapshot, dict) and isinstance(previous, dict):
-                # A callback may capture the same song twice almost
-                # immediately. A sub-second time difference is not a new
-                # meaningful resume position; retain the last saved time.
-                new_core = {k: v for k, v in snapshot.items()
-                            if k not in ('seconds', 'updated_at')}
-                old_core = {k: v for k, v in previous.items()
-                            if k not in ('seconds', 'updated_at')}
-                try:
-                    unchanged_time = abs(float(snapshot.get('seconds', 0)) -
-                                         float(previous.get('seconds', 0))) < 1.0
-                except (TypeError, ValueError):
-                    unchanged_time = False
-                if new_core == old_core and unchanged_time:
+                new_core = {k: v for k, v in snapshot.items() if k not in ('seconds', 'updated_at')}
+                old_core = {k: v for k, v in previous.items() if k not in ('seconds', 'updated_at')}
+                if new_core == old_core and previous.get('seconds') == 0:
                     return
-            Store.update_state('music', snapshot)
+            Store.update_state('music', snapshot, last_media='music')
 
     @staticmethod
     def clear_music_snapshot():
@@ -308,7 +319,7 @@ class Store:
             "params": {
                 "file": filepath,
                 "media": "video",
-                "properties": ["playcount", "runtime"]
+                "properties": []
             },
             "id": "fileDetailsCheck"
         }
@@ -334,12 +345,6 @@ class Store:
                 log("Video queue is building; delaying snapshot write")
                 Store.currently_playing_file_path = None
                 return
-            playlist_query = {
-                "jsonrpc": "2.0",
-                "method": "Playlist.GetItems",
-                "params": {"playlistid": 1},
-                "id": "playlist_items"
-            }
             player_query = {
                 "jsonrpc": "2.0",
                 "method": "Player.GetProperties",
@@ -350,7 +355,11 @@ class Store:
                 "id": "player_properties"
             }
             player_props = json.loads(xbmc.executeJSONRPC(json.dumps(player_query)))
-            playlist_items = json.loads(xbmc.executeJSONRPC(json.dumps(playlist_query)))
+            live_items = video_queue._live_queue_items()
+            if live_items is None:
+                log("Could not read complete video playlist; retaining saved snapshot")
+                Store.currently_playing_file_path = None
+                return
             # The player's numeric position is not a reliable identity: it
             # can become stale when playback switches tracks or shuffle changes.
             # Use the actual file's Kodi library ID to find its queue entry.
@@ -358,10 +367,12 @@ class Store:
                 reported_position = int(player_props['result']['position'])
             except (KeyError, ValueError, TypeError):
                 reported_position = -1
-            filtered = []
-            for item in playlist_items.get('result', {}).get('items', []):
-                if item.get('type') in ('movie', 'episode', 'musicvideo') and isinstance(item.get('id'), int):
-                    filtered.append({item['type'] + 'id': item['id']})
+            filtered = [{item['type'] + 'id': item['id']} for item in live_items
+                        if item.get('type') in ('movie', 'episode', 'musicvideo') and type(item.get('id')) is int]
+            if len(filtered) != len(live_items):
+                log('Video queue contains unrecognized entries; refusing partial snapshot')
+                Store.currently_playing_file_path = None
+                return
 
             current_item = {Store.type_of_video + 'id': Store.library_id}
             matches = [i for i, item in enumerate(filtered) if item == current_item]

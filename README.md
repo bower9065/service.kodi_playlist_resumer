@@ -1,3 +1,7 @@
+## v1.1.81 — Remove test artifacts
+
+Native XSP queue loading, random ordering and exact restoration remain unchanged. Diagnostics are logged to kodi.log only. The standalone XSP test and its settings button have been removed. Existing files are not automatically deleted.
+
 ### v1.1.55 — Unified resume data (no migration)
 - All persistent *resume state* is now stored in **`resume data.json`** in the add-on's profile directory, with separate `video`, `music`, and `last_used` sections.
 - Saves use atomic replacement and a thread lock to prevent a concurrent music/video/priority save from overwriting another section.
