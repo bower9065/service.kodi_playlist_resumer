@@ -1,4 +1,9 @@
 """On-demand configurable library cache with incremental event updates."""
+if __package__:
+    from . import timing
+else:
+    import timing
+
 import json
 import os
 import random
@@ -11,7 +16,7 @@ from xbmcaddon import Addon
 
 CACHE_NAME = "play_random_library_cache.json"
 CACHE_VERSION = 2  # Version 2 stores file paths for native XSP queues.
-IGNORED_NAME = "play_random_ignored_cache_v2.json"
+IGNORED_NAME = "play_random_ignored_cache.json"
 # Use smaller reads to let playback queue loading interrupt between JSON-RPC
 # requests. The cache runs in the background, so throughput is not critical.
 PAGE_SIZE = 250
@@ -26,7 +31,7 @@ _lock = threading.RLock()
 
 
 def _log(message, level=xbmc.LOGINFO):
-    xbmc.log("Play Random library cache: " + str(message), level)
+    xbmc.log('###Kodi Playlist Resumer - ' + ("Play Random library cache: " + str(message)), level)
 
 
 def _paths():
@@ -60,6 +65,7 @@ _read_cache_lock = threading.RLock()
 _read_cache_entry = None
 
 
+@timing.span("library_cache.read_selection_cache")
 def read_selection_cache():
     """Reuse parsed selection data until the atomic cache file is replaced."""
     global _read_cache_entry
@@ -68,12 +74,18 @@ def read_selection_cache():
         try:
             stat = os.stat(path)
             key = (path, stat.st_mtime_ns, stat.st_size, stat.st_ino)
-        except OSError:
+        except OSError as error:
+            timing.mark("Library cache MISS source=disk reason=%s" % type(error).__name__)
             _read_cache_entry = None
             return _empty()
         if _read_cache_entry is None or _read_cache_entry[0] != key:
             _read_cache_entry = (key, _read(path))
-        return _read_cache_entry[1]
+            source = "disk"
+        else:
+            source = "memory"
+        data = _read_cache_entry[1]
+        timing.mark("Library cache snapshot source=%s sections=%s" % (source, {k: len(data[k]) if data[k] is not None else "missing" for k in KINDS}))
+        return data
 
 
 def _write(path, data):
@@ -146,6 +158,7 @@ def _playlist_is_loading():
         return False
 
 
+@timing.span("library_cache._yield_to_playback")
 def _yield_to_playback(monitor=None):
     """Pause cache work while a video queue is being populated."""
     while _playlist_is_loading():
@@ -163,7 +176,7 @@ def _rpc(method, params, monitor=None):
     try:
         request = json.dumps({"jsonrpc": "2.0", "id": "playRandomCache",
                               "method": method, "params": params})
-        response = json.loads(xbmc.executeJSONRPC(request))
+        response = json.loads(timing.execute(request))
         if isinstance(response, dict) and "error" not in response:
             return response.get("result")
         _log("JSON-RPC failed for " + method + ": " + str(response), xbmc.LOGWARNING)
@@ -172,6 +185,7 @@ def _rpc(method, params, monitor=None):
     return None
 
 
+@timing.span("library_cache._collect_kind")
 def _collect_kind(kind, monitor=None):
     """Fetch IDs and playable file paths for native video M3U playlists."""
     collected = {}
@@ -208,7 +222,8 @@ def _collect_kind(kind, monitor=None):
     return list(collected.values())
 
 
-def invalidate_smart_cache():
+def invalidate_smart_cache(reason="unspecified"):
+    _log("Smart cache INVALIDATE reason=" + str(reason))
     # A persistent operational marker survives Kodi restarts. Its generation
     # is compared with the generation captured before a smart cache rebuild.
     path = _paths()[1] + ".invalidated"
@@ -238,18 +253,28 @@ def cache_max_age():
     return 24 * 3600
 
 
+@timing.span("library_cache.ensure_fresh")
 def ensure_fresh(monitor=None):
     """Refresh only when random playback requests a missing or expired cache."""
     path = _paths()[0]
     def fresh(data):
-        return all(data.get(k) is not None for k in KINDS) and 0 <= time.time() - float(data.get("built_at", 0)) < cache_max_age()
+        missing = [k for k in KINDS if data.get(k) is None]
+        age = time.time() - float(data.get("built_at", 0))
+        limit = cache_max_age()
+        valid = not missing and 0 <= age < limit
+        reason = "fresh" if valid else ("missing_sections=" + ",".join(missing) if missing else ("no_build_timestamp" if not data.get("built_at") else "expired_or_future_timestamp"))
+        timing.mark("Library cache freshness %s reason=%s age_hours=%s limit_hours=%.2f" % ("HIT" if valid else "MISS", reason, "unknown" if not data.get("built_at") else "%.3f" % (age/3600), limit/3600))
+        return valid
     if fresh(read_selection_cache()):
         return True
     with CacheLock(path, monitor=monitor, timeout=10) as acquired:
         if not acquired:
+            timing.mark("Library cache rebuild skipped reason=lock_unavailable")
             return False
+        timing.mark("Library cache freshness recheck source=disk")
         if fresh(_read(path)):
             return True
+        timing.mark("Library cache REBUILD START reason=missing_or_expired")
         data = _empty()
         started = time.time()
         for kind in KINDS:
@@ -262,10 +287,12 @@ def ensure_fresh(monitor=None):
             return False
         data["built_at"] = time.time()
         _write(path, data)
+        timing.mark("Library cache REBUILD END elapsed=%.3fs" % (time.time()-started))
         _log("On-demand library rebuild complete: " + str({k: len(data[k]) for k in KINDS}))
         return True
 
 
+@timing.span("library_cache.select")
 def select(kind, count, ignored_ids=(), tvshowid=None, season=None, monitor=None):
     """Read a ready index only; never build one in Play Random's script."""
     if kind not in KINDS or (monitor is not None and monitor.abortRequested()):
@@ -273,7 +300,9 @@ def select(kind, count, ignored_ids=(), tvshowid=None, season=None, monitor=None
     data = read_selection_cache()
     rows = data[kind]
     if rows is None:
+        timing.mark("Library selection cache MISS kind=%s reason=section_missing" % kind)
         return None
+    timing.mark("Library selection cache HIT kind=%s entries=%d" % (kind, len(rows)))
     ignored = set(ignored_ids)
     eligible = []
     for row in rows:
@@ -285,7 +314,9 @@ def select(kind, count, ignored_ids=(), tvshowid=None, season=None, monitor=None
         if season is not None and row.get("season") != season:
             continue
         eligible.append({kind + "id": video_id})
-    return random.sample(eligible, min(max(int(count), 0), len(eligible)))
+    selected = random.sample(eligible, min(max(int(count), 0), len(eligible)))
+    timing.mark("Library selection cache kind=%s eligible=%d selected=%d" % (kind, len(eligible), len(selected)))
+    return selected
 
 
 def _get_updated_item(kind, item_id, monitor=None):
@@ -416,30 +447,56 @@ class BackgroundCacheWorker:
         if method in ("VideoLibrary.OnScanFinished", "VideoLibrary.OnCleanFinished"):
             with self._cv:
                 self._scanning = False
-                # Finish any sections deferred by an ongoing Kodi library scan.
-                # Existing sections are NOT rebuilt here.
                 self._cv.notify_all()
             return
         if method not in ("VideoLibrary.OnUpdate", "VideoLibrary.OnRemove"):
             return
         try:
             payload = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
-            # Kodi usually sends {'type': ..., 'id': ...}, but some sources
-            # wrap that payload in 'item'. Support both formats.
-            if isinstance(payload, dict):
-                payload = payload.get("item", payload)
-            kind, item_id = payload.get("type"), payload.get("id")
+            item = payload.get("item", payload)
+            kind, item_id = item.get("type"), item.get("id")
             if kind not in KINDS + ("tvshow",) or type(item_id) is not int or item_id < 1:
                 return
             action = "remove" if method == "VideoLibrary.OnRemove" else "update"
+            flags = dict(item)
+            flags.update(payload)
         except (ValueError, TypeError, AttributeError):
             return
-        invalidate_smart_cache()
+        with self._cv:
+            scanning = self._scanning
+        reason = None
+        if action == "remove":
+            reason = "item_removed"
+        elif flags.get("added") is True:
+            reason = "item_added"
+        elif scanning or flags.get("transaction") is True:
+            reason = "scan_or_transaction_update"
+        else:
+            # Kodi's generic OnUpdate does not identify which metadata changed.
+            # Static exclusions can wait for TTL/manual rebuild; dynamic rules
+            # retain conservative invalidation on ambiguous playback updates.
+            try:
+                with open(_paths()[1], "r", encoding="utf-8") as f:
+                    smart = json.load(f)
+                sensitive = smart.get("playback_sensitive", True) is not False
+            except (OSError, ValueError, TypeError, AttributeError):
+                sensitive = True
+            if sensitive:
+                reason = "playback_sensitive_or_unknown_rules"
+            elif flags.get("playcount", -1) != -1:
+                reason = None
+        details = "%s %s:%s flags=%r" % (method, kind, item_id, {k: flags[k] for k in ("added", "playcount", "transaction") if k in flags})
+        if reason:
+            invalidate_smart_cache(reason + " " + details)
+        else:
+            _log("Smart cache KEEP reason=static_rules_nonstructural_update " + details)
+        # Keep incremental library index maintenance unchanged.
         with self._cv:
             self._updates[(kind, item_id)] = action
             self._last_change = time.monotonic()
             self._cv.notify_all()
 
+    @timing.span("library_cache._build_missing")
     def _build_missing(self):
         path, _ = _paths()
         for kind in KINDS:
@@ -468,6 +525,7 @@ class BackgroundCacheWorker:
                         _write(path, data)
                         _log("Background index ready: {} {} entries".format(len(rows), kind))
 
+    @timing.span("library_cache._rebuild_all")
     def _rebuild_all(self):
         path, _ = _paths()
         data = _empty()
@@ -487,7 +545,7 @@ class BackgroundCacheWorker:
                 _write(path, data)
                 _log("Manual library rebuild complete: " + str({k: len(data[k]) for k in KINDS}))
                 import xbmcgui
-                xbmcgui.Dialog().notification("Play Random", "Library cache rebuilt")
+                xbmcgui.Dialog().notification("Playlist Resumer", "Library cache rebuilt")
 
     def _run(self):
         # Give the Kodi UI and startup playback restoration an initial head start.
@@ -502,7 +560,7 @@ class BackgroundCacheWorker:
             with self._cv:
                 scanning = self._scanning
                 rebuilding = self._rebuild
-            if scanning:
+            if scanning or _playlist_is_loading():
                 with self._cv:
                     self._cv.wait(timeout=0.5)
                 continue

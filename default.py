@@ -17,11 +17,11 @@ if __name__ == "__main__":
                 if context.CONTEXT_MONITOR.abortRequested():
                     raise RuntimeError("Rebuild interrupted")
                 message = "Smart-playlist cache rebuilt: {} items".format(len(rows))
-            xbmcgui.Dialog().notification("Play Random", message)
+            xbmcgui.Dialog().notification("Playlist Resumer", message)
         except (OSError, ValueError, RuntimeError, TypeError) as error:
             import xbmc
-            xbmc.log("Play Random cache rebuild: " + str(error), xbmc.LOGERROR)
-            xbmcgui.Dialog().notification("Play Random", str(error), xbmcgui.NOTIFICATION_WARNING)
+            xbmc.log('###Kodi Playlist Resumer - ' + ("Play Random cache rebuild: " + str(error)), xbmc.LOGERROR)
+            xbmcgui.Dialog().notification("Playlist Resumer", str(error), xbmcgui.NOTIFICATION_WARNING)
     else:
         from resources.lib import playback_resumer
         playback_resumer.run()

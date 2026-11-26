@@ -1,3 +1,8 @@
+if __package__:
+    from . import timing
+else:
+    import timing
+
 from .common import *
 from . import video_queue
 import os
@@ -19,6 +24,32 @@ class Store:
     restore_priority = "video"
     state_file = ""
     _state_lock = threading.RLock()
+    video_queue_generation = 0
+    _video_queue_cache = None
+    _video_queue_cache_generation = -1
+    _video_queue_cache_size = -1
+
+    @staticmethod
+    def video_queue_dirty():
+        return (Store._video_queue_cache is None or
+                Store._video_queue_cache_generation != Store.video_queue_generation or
+                Store._video_queue_cache_size != xbmc.PlayList(xbmc.PLAYLIST_VIDEO).size())
+
+    @staticmethod
+    def read_video_queue_cached():
+        if not Store.video_queue_dirty():
+            return Store._video_queue_cache
+        generation = Store.video_queue_generation
+        rows = video_queue._live_queue_items()
+        if rows is None:
+            return None
+        identities = [identity for row in rows if (identity := video_queue._identity(row))]
+        if not identities:
+            return None
+        Store._video_queue_cache = identities
+        Store._video_queue_cache_generation = generation
+        Store._video_queue_cache_size = xbmc.PlayList(xbmc.PLAYLIST_VIDEO).size()
+        return identities
     autoplay_random = True
     autoplay_queue_completion = True
     queue_completion_delay = 12
@@ -158,6 +189,7 @@ class Store:
                     pass
 
     @staticmethod
+    @timing.span("store.update_state")
     def update_state(section, value, last_media=None):
         """Update one section atomically, backing up the previous good state.
 
@@ -209,6 +241,7 @@ class Store:
         return False
 
     @staticmethod
+    @timing.span("store.get_video_snapshot")
     def get_video_snapshot():
         return Store.read_state()['video']
 
@@ -225,6 +258,7 @@ class Store:
             Store.update_state('video', video)
 
     @staticmethod
+    @timing.span("store.get_music_snapshot")
     def get_music_snapshot():
         return Store.read_state().get('music')
 
@@ -309,6 +343,10 @@ class Store:
         """
         Persistently tracks the currently playing file (in case of crash, for possible resuming)
         """
+        if video_queue.snapshots_blocked():
+            Store.currently_playing_file_path = None
+            log("Video queue is building; deferring playback tracking to service retry")
+            return
         if Store.is_excluded(filepath):
             log("Skipping excluded filepath: " + filepath)
             Store.clear_old_play_details()
@@ -324,7 +362,7 @@ class Store:
             "id": "fileDetailsCheck"
         }
         log(f'Executing JSON-RPC: {json.dumps(query)}')
-        json_response = json.loads(xbmc.executeJSONRPC(json.dumps(query)))
+        json_response = json.loads(timing.execute(json.dumps(query)))
         log(f'JSON-RPC Files.GetFileDetails response: {json.dumps(json_response)}')
         try:
             Store.type_of_video = json_response['result']['filedetails']['type']
@@ -345,43 +383,20 @@ class Store:
                 log("Video queue is building; delaying snapshot write")
                 Store.currently_playing_file_path = None
                 return
-            player_query = {
-                "jsonrpc": "2.0",
-                "method": "Player.GetProperties",
-                "params": {
-                    "playerid": 1,
-                    "properties": ["position"]
-                },
-                "id": "player_properties"
-            }
-            player_props = json.loads(xbmc.executeJSONRPC(json.dumps(player_query)))
-            live_items = video_queue._live_queue_items()
-            if live_items is None:
-                log("Could not read complete video playlist; retaining saved snapshot")
+            filtered = Store.read_video_queue_cached()
+            if filtered is None:
+                log("Could not read native video playlist; retaining previous snapshot for retry")
                 Store.currently_playing_file_path = None
                 return
-            # The player's numeric position is not a reliable identity: it
-            # can become stale when playback switches tracks or shuffle changes.
-            # Use the actual file's Kodi library ID to find its queue entry.
-            try:
-                reported_position = int(player_props['result']['position'])
-            except (KeyError, ValueError, TypeError):
-                reported_position = -1
-            filtered = [{item['type'] + 'id': item['id']} for item in live_items
-                        if item.get('type') in ('movie', 'episode', 'musicvideo') and type(item.get('id')) is int]
-            if len(filtered) != len(live_items):
-                log('Video queue contains unrecognized entries; refusing partial snapshot')
-                Store.currently_playing_file_path = None
-                return
+            reported_position = xbmc.PlayList(xbmc.PLAYLIST_VIDEO).getposition()
 
             current_item = {Store.type_of_video + 'id': Store.library_id}
             matches = [i for i, item in enumerate(filtered) if item == current_item]
             if not matches:
                 log(f"Refusing to save a mismatched resume queue: active={current_item}, "
                     f"reported_position={reported_position}, saved_queue={len(filtered)}")
-                # Keep the last valid persisted snapshot until Kodi has a
-                # consistent queue; do not replace it with the wrong video.
                 Store.currently_playing_file_path = None
+                Store._video_queue_cache = None
                 return
 
             final_position = (reported_position if reported_position in matches

@@ -149,7 +149,7 @@
       <group id="2" label="32049">
         <setting help="32210" id="randomitems" label="32038" type="integer">
           <level>0</level>
-          <default>2000</default>
+          <default>500</default>
           <constraints>
             <minimum>1</minimum>
             <maximum>10000</maximum>

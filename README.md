@@ -1,3 +1,11 @@
+## v1.1.119 — Accept available native video queue
+
+Skip missing or unreadable entries without a settlement wait or JSON-RPC retrieval fallback. Continue with available native items when sizes change. Save actual playback order and position; clear old video resume if the new queue cannot be captured.
+
+## v1.1.118 — Immediate native queue verification
+
+Remove the XSP settlement wait. Read the native video queue once immediately after Playlist.Add; skip missing IDs without retries or JSON-RPC retrieval fallback. Keep native size consistency checks.
+
 ## v1.1.81 — Remove test artifacts
 
 Native XSP queue loading, random ordering and exact restoration remain unchanged. Diagnostics are logged to kodi.log only. The standalone XSP test and its settings button have been removed. Existing files are not automatically deleted.
@@ -56,3 +64,41 @@ Build the complete playlist before starting playback for manual Play Random, aut
 - Restore the entire remaining queue before starting playback, explicitly disable extra shuffle when resuming, and verify the started item before seeking.
 - Keep the previous good snapshot if a playback-start event returns an inconsistent queue.
 - Existing saved snapshots from older versions lack the exact video ID and still use the saved numeric position.
+
+### Optional fullscreen progress skin integration (1.1.131)
+
+The native background progress dialog is skin-dependent. For a noninteractive
+fullscreen bar, add the following group inside the existing `<controls>` element
+of your skin's `VideoFullScreen.xml`. Back up the skin file first; no skin files
+are modified automatically. Coordinates assume a 1920x1080 skin.
+
+```xml
+<control type="group">
+    <visible>!String.IsEmpty(Window(Home).Property(KPR.RandomProgress.Active))</visible>
+    <left>1280</left><top>45</top>
+    <control type="label">
+        <left>0</left><top>0</top><width>580</width><height>45</height>
+        <label>$INFO[Window(Home).Property(KPR.RandomProgress.Message)]</label>
+        <font>font13</font><textcolor>white</textcolor>
+    </control>
+    <control type="progress">
+        <left>0</left><top>48</top><width>580</width><height>16</height>
+        <info>Window(Home).Property(KPR.RandomProgress.Percent)</info>
+        <texturebg>progress_back.png</texturebg>
+        <midtexture>progress_mid.png</midtexture>
+    </control>
+</control>
+```
+Adjust font and texture names to match the active skin. Reload the skin after editing.
+
+## v1.1.132 stability diagnostic
+Manual random only: no native progress dialog or progress properties, no final GUI refresh, two seconds of stabilization after first playback and 500 ms before each later batch. Busy dialog closes are timed. Resume and automatic random retain their existing behavior.
+
+## v1.1.133
+Manual random restores native DialogProgressBG with per-batch updates and timed GUI calls. No custom fullscreen skin properties are updated. All explicit playlist GUI refresh scheduling and execution are removed, including resume and automatic random. Batch pacing and playback stabilization remain unchanged. Native progress visibility depends on the skin.
+
+## v1.1.134
+Manual random uses at most two XSP batches: first 100, then all remaining items after verified playback and initial snapshot. Automatic inclusion/exclusion rules per batch; no artificial waits. Progress updates once per completed batch. Explicit playlist refreshes remain disabled.
+
+## v1.1.135
+Manual progressive random no longer saves initial, final, or interrupted queue snapshots inline. Existing video snapshot invalidation before replacement is retained. Normal playback tracking retries after the loading marker clears; while loading, tracking skips file details and queue reads. Two batches, progress bar, and no forced playlist refreshes remain unchanged.

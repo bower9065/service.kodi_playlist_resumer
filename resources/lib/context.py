@@ -1,9 +1,18 @@
+if __package__:
+    from . import timing
+else:
+    import timing
+
 import sys
 import xbmc
 import xbmcgui
 import json
 import os
 import time
+import uuid
+import random
+import hashlib
+import xml.etree.ElementTree as ET
 import xbmcvfs
 from xbmcaddon import Addon
 # Kodi executes this context-menu file directly from resources/lib.  The
@@ -19,7 +28,6 @@ addon = Addon()
 randomitems = addon.getSettingInt("randomitems")
 
 # Smart playlist freshness uses the shared configurable cache lifetime.
-PLAYLIST_ADD_BATCH_SIZE = 500
 # This is a separate Kodi Python script, so it needs its own abort monitor.
 CONTEXT_MONITOR = xbmc.Monitor()
 
@@ -36,20 +44,26 @@ def build_jsonrpc(method, params=None, rpc_id="1"):
 def safe_execute(query):
     if CONTEXT_MONITOR.abortRequested():
         return {}
-    response = xbmc.executeJSONRPC(query)
+    response = timing.execute(query)
     try:
         return json.loads(response)
     except (ValueError, TypeError):
-        xbmc.log(f"JSON decode error for query: {query}", xbmc.LOGERROR)
+        xbmc.log('###Kodi Playlist Resumer - ' + (f"JSON decode error for query: {query}"), xbmc.LOGERROR)
         return {}
 
 
+@timing.span("context.close_busy_dialog")
 def close_busy_dialog():
-    xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
+    for name in ("busydialognocancel", "busydialog"):
+        video_queue._timed_call("GUI.Dialog.Close." + name, xbmc.executebuiltin, "Dialog.Close(%s,true)" % name, False)
 
 
-def start_playlist(items, selected_item=None, source="random-library"):
-    """Queue everything before playback, with the clicked item first when given."""
+from status import StatusProgress as RandomProgress
+
+
+@timing.span("context.start_playlist")
+def start_playlist(items, selected_item=None, source="random-library", progress=None):
+    """Start selected library item then append one XSP."""
     if selected_item:
         # Place the explicitly selected library item first, independently of
         # the random library query (which may contain the selected item too).
@@ -57,19 +71,25 @@ def start_playlist(items, selected_item=None, source="random-library"):
     items = list(items)[:max(1, randomitems)]
     if not items or CONTEXT_MONITOR.abortRequested():
         return False
-    # Begin playback with the selected item immediately. Snapshot protection
+    # Begin playback with the selected library item for manual random. Snapshot protection
     # lives in the service too, because context.py is a separate interpreter.
-    started, complete = video_queue.start_queue(
-        items, batch_size=PLAYLIST_ADD_BATCH_SIZE, monitor=CONTEXT_MONITOR, source=source, random_order=True)
-    close_busy_dialog()
+    if progress is not None:
+        started, complete = video_queue.start_single_random(
+            items, CONTEXT_MONITOR, progress, source=source)
+        progress.loading_succeeded = started and complete
+    else:
+        started, complete = video_queue.start_queue(
+            items, monitor=CONTEXT_MONITOR, source=source, random_order=True)
     if not complete:
-        xbmc.log("Play Random: queue incomplete; previous saved resume retained",
+        xbmc.log('###Kodi Playlist Resumer - ' + ("Play Random: queue incomplete"),
                  xbmc.LOGWARNING)
     return started
 
+@timing.span("context.collect_ignored_ids")
 def collect_ignored_ids(force=False, membership=None):
     """Map excluded (type, library id) to smart playlist, with short-lived cache."""
     if (not force and not addon.getSettingBool("IgnoreSmartPlaylistItems")) or CONTEXT_MONITOR.abortRequested():
+        timing.mark("Smart playlist cache BYPASS reason=disabled_or_aborted")
         return {}
 
     cache_file = library_cache._paths()[1]
@@ -77,8 +97,8 @@ def collect_ignored_ids(force=False, membership=None):
     try:
         with open(cache_file, "r", encoding="utf-8") as f:
             old = json.load(f)
-    except (OSError, ValueError, TypeError):
-        pass
+    except (OSError, ValueError, TypeError) as error:
+        timing.mark("Smart playlist cache disk read MISS reason=%s" % type(error).__name__)
     def unpack(data):
         try:
             return {(row[0], row[1]): row[2] for row in (data.get("rows", []) if isinstance(data, dict) else data)}
@@ -94,16 +114,84 @@ def collect_ignored_ids(force=False, membership=None):
         paths = sorted({pl.get("file") for pl in response["result"].get("files", [])
                         if pl.get("file") and "kpr_xsp_metadata_test" not in pl["file"] and "kpr_internal_" not in pl["file"]})
         fingerprint = []
+        playback_sensitive = False
+        rule_fields = set()
         for path in paths:
-            stat = xbmcvfs.Stat(path)
-            fingerprint.append([path, stat.st_mtime(), stat.st_size()])
+            # library:// is a directory URI, not a readable file. Resolve
+            # custom library nodes or matching physical smart playlists.
+            candidates = [path]
+            if path.startswith("library://video/"):
+                rel = path[len("library://video/"):].rstrip("/")
+                candidates = ["special://profile/library/video/" + rel,
+                              "special://masterprofile/library/video/" + rel,
+                              "special://xbmc/system/library/video/" + rel]
+                name = rel.rsplit("/", 1)[-1]
+                if name.lower().endswith(".xml"):
+                    candidates.append("special://videoplaylists/" + name[:-4] + ".xsp")
+            raw = None
+            for candidate in candidates:
+                if not xbmcvfs.exists(candidate):
+                    continue
+                handle = xbmcvfs.File(candidate)
+                try:
+                    raw = bytes(handle.readBytes())
+                finally:
+                    handle.close()
+                if raw:
+                    timing.mark("Smart playlist fingerprint source=%s path=%s" % (candidate, path))
+                    break
+            if not raw:
+                if not path.startswith("library://"):
+                    raise RuntimeError("Cannot read playlist fingerprint: " + path)
+                # Membership can still be enumerated via Files.GetDirectory.
+                # Unknown node rules are conservative; content changes not
+                # detectable here are covered by expiry/manual rebuild.
+                fingerprint.append([path, "virtual-unresolved-v1"])
+                playback_sensitive = True
+                timing.mark("Smart playlist fingerprint virtual unresolved path=%s" % path)
+                continue
+            fingerprint.append([path, hashlib.sha256(raw).hexdigest()])
+            try:
+                xml = ET.fromstring(raw)
+                if xml.tag.lower() != "smartplaylist" and not (xml.tag.lower() == "node" and xml.get("type", "").lower() == "filter"):
+                    playback_sensitive = True
+                fields = {node.get("field", "").lower() for node in xml.iter("rule")}
+                fields.update((node.text or "").strip().lower() for node in xml.iter("order"))
+                rule_fields.update(fields)
+                # Playlist references can inherit playback-dependent rules.
+                if not fields or fields.intersection({"playcount", "lastplayed", "inprogress", "resume", "resumepercentage", "playlist", "virtualfolder", "watched", "unwatched", "random", "dateadded", "lastupdated"}) or (xml.tag.lower() == "node" and xml.find("path") is not None):
+                    playback_sensitive = True
+            except (ET.ParseError, ValueError):
+                playback_sensitive = True
+        timing.mark("Smart playlist cache rule fields=%s playback_sensitive=%s" % (sorted(rule_fields), playback_sensitive))
+        if isinstance(old, dict) and old.get("fingerprint") != fingerprint:
+            before = {row[0]: row[1:] for row in old.get("fingerprint", []) if isinstance(row, list) and len(row) >= 2}
+            after = {row[0]: row[1:] for row in fingerprint}
+            for path in sorted(set(before) | set(after)):
+                if before.get(path) != after.get(path):
+                    timing.mark("Smart playlist fingerprint changed path=%r old=%r new=%r" % (path, before.get(path), after.get(path)))
+        timing.mark("Smart playlist cache fingerprint checked playlists=%d" % len(paths))
         if (not force and isinstance(old, dict) and old.get("generation") == generation
                 and old.get("fingerprint") == fingerprint
                 and isinstance(old.get("memberships"), dict)
+                and old.get("fingerprint_version") == 4
                 and 0 <= time.time() - float(old.get("built_at", 0)) < library_cache.cache_max_age()):
+            timing.mark("Smart playlist cache HIT source=disk age_hours=%.3f limit_hours=%.2f excluded=%d" % ((time.time()-float(old.get("built_at", 0)))/3600, library_cache.cache_max_age()/3600, len(previous)))
             if membership is not None:
                 membership.update(old["memberships"])
             return previous
+        reasons = []
+        if force: reasons.append("forced")
+        if not isinstance(old, dict) or not old: reasons.append("missing_or_invalid")
+        if isinstance(old, dict):
+            if old.get("generation") != generation: reasons.append("invalidated")
+            if old.get("fingerprint") != fingerprint: reasons.append("fingerprint_changed")
+            if old.get("fingerprint_version") != 4: reasons.append("rule_classifier_changed")
+            if not isinstance(old.get("memberships"), dict): reasons.append("memberships_missing")
+            age = time.time() - float(old.get("built_at", 0))
+            if not 0 <= age < library_cache.cache_max_age(): reasons.append("expired_or_missing_timestamp")
+            timing.mark("Smart playlist cache age_hours=%s limit_hours=%.2f" % ("%.3f" % (age/3600) if old.get("built_at") else "unknown", library_cache.cache_max_age()/3600))
+        timing.mark("Smart playlist cache MISS reason=%s; REBUILD START" % ",".join(reasons))
         ignored_map = {}
         memberships = {}
         for path in paths:
@@ -125,15 +213,17 @@ def collect_ignored_ids(force=False, membership=None):
             if not acquired:
                 raise RuntimeError("Smart cache busy")
             library_cache._write(cache_file, {"built_at": time.time(), "generation": generation,
-                "fingerprint": fingerprint, "memberships": memberships, "rows": [[k, i, pl] for (k, i), pl in ignored_map.items()]})
-        xbmc.log("Play Random: smart-playlist cache rebuilt", xbmc.LOGINFO)
+                "fingerprint": fingerprint, "fingerprint_version": 4, "playback_sensitive": playback_sensitive, "rule_fields": sorted(rule_fields), "memberships": memberships, "rows": [[k, i, pl] for (k, i), pl in ignored_map.items()]})
+        timing.mark("Smart playlist cache REBUILD END playlists=%d excluded=%d" % (len(memberships), len(ignored_map)))
+        xbmc.log('###Kodi Playlist Resumer - ' + ("Play Random: smart-playlist cache rebuilt"), xbmc.LOGINFO)
         if membership is not None:
             membership.update(memberships)
         return ignored_map
     except (OSError, ValueError, TypeError, RuntimeError) as error:
-        xbmc.log("Play Random smart cache rebuild failed; previous cache retained: " + str(error), xbmc.LOGWARNING)
+        xbmc.log('###Kodi Playlist Resumer - ' + ("Play Random smart cache rebuild failed; previous cache retained: " + str(error)), xbmc.LOGWARNING)
         if force:
             raise
+        timing.mark("Smart playlist cache FALLBACK source=previous_disk_snapshot excluded=%d error=%s" % (len(previous), type(error).__name__))
         return previous
 
 
@@ -149,6 +239,7 @@ def filter_items(items, item_type, ignored_ids, list_item, ignored_collector):
     return result
 
 
+@timing.span("context.fetch_and_filter")
 def fetch_and_filter(method, result_key, item_type, ignored_ids, list_item,
                      ignored_collector, fetch_size=None, max_keep=None, params_extra=None):
     if max_keep is None:
@@ -173,12 +264,14 @@ def fetch_and_filter(method, result_key, item_type, ignored_ids, list_item,
         monitor=CONTEXT_MONITOR)
     if cached is not None:
         return cached
+    timing.mark("Library selection FALLBACK source=direct_RPC method=%s" % method)
     # If initial cache creation failed, keep the original Kodi query path.
     result = safe_execute(build_jsonrpc(method, params)).get("result", {}).get(result_key, [])
     filtered = filter_items(result, item_type, ignored_ids, list_item, ignored_collector)
     return filtered[:max_keep]
 
 
+@timing.span("context.run_context_menu")
 def run_context_menu():
     if CONTEXT_MONITOR.abortRequested():
         return
@@ -203,10 +296,12 @@ def run_context_menu():
 
     list_item_key = (db_type, int(dbid)) if str(dbid).isdigit() and int(dbid) > 0 else None
 
-    xbmc.executebuiltin("ActivateWindow(busydialognocancel)")
+    progress = RandomProgress(message="Preparing to play random music videos..." if db_type == "musicvideo" else "Preparing to play random videos...")
 
+    token = uuid.uuid4().hex
     try:
-        if path.startswith("videodb://") or (list_item_key and db_type in ("movie", "episode")):
+        video_queue._atomic_json(video_queue.MARKER, {'token': token, 'started': time.time(), 'status': 'xsp-loading'})
+        if path.startswith("videodb://") or (list_item_key and db_type in ("movie", "episode", "season", "tvshow")):
             library_cache.ensure_fresh(CONTEXT_MONITOR)
             membership = {}
             ignored_ids = collect_ignored_ids(membership=membership)
@@ -231,7 +326,7 @@ def run_context_menu():
 
                 if target_start_item:
                     start_playlist([target_start_item] + remaining,
-                                   selected_item=target_start_item, source="smart-playlist: " + parent_playlist)
+                                   selected_item=target_start_item, source="smart-playlist: " + parent_playlist, progress=progress)
                 return
 
             if db_type == "movie":
@@ -241,7 +336,7 @@ def run_context_menu():
                     ignored_ids, list_item_key, ignored_collector
                 )
                 if first_item:
-                    start_playlist(fetched, selected_item=first_item)
+                    start_playlist(fetched, selected_item=first_item, progress=progress)
 
             elif db_type == "episode":
                 first_item = {"episodeid": list_item_key[1]} if list_item_key else None
@@ -257,7 +352,7 @@ def run_context_menu():
                     params_extra=params_extra
                 )
                 if first_item:
-                    start_playlist(fetched, selected_item=first_item)
+                    start_playlist(fetched, selected_item=first_item, progress=progress)
 
             elif db_type in ("season", "tvshow"):
                 tvshow_id = (xbmc.getInfoLabel("ListItem.TvShowDBID()")
@@ -279,15 +374,25 @@ def run_context_menu():
                         max_keep=randomitems, params_extra=params_extra
                     )
                     if fetched:
-                        start_playlist(fetched)
+                        start_playlist(fetched, progress=progress)
 
         elif path.startswith("library://"):
+            video_queue.clear_playlist_first(CONTEXT_MONITOR, stop_video=True)
             safe_execute(build_jsonrpc("Player.Open", {
                 "item": {"recursive": True, "directory": path},
                 "options": {"shuffled": True}
             }))
+    except Exception as error:
+        xbmc.log('###Kodi Playlist Resumer - ' + ("Play Random failed: " + str(error)), xbmc.LOGERROR)
     finally:
-        close_busy_dialog()
+        try:
+            video_queue._remove_if_token(token)
+        finally:
+            try:
+                progress.close()
+            finally:
+                if not progress.loading_succeeded:
+                    close_busy_dialog()
 
 
 if __name__ == "__main__":

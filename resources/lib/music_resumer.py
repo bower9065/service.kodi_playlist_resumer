@@ -4,6 +4,11 @@
 The snapshot is written atomically only when the active song agrees with the
 playlist.  Never overwrite a good snapshot with a partially loaded queue.
 """
+if __package__:
+    from . import timing
+else:
+    import timing
+
 import json
 import os
 import time
@@ -11,12 +16,14 @@ import time
 import xbmc
 from .common import log, notify, xbmcgui, wait_preparing
 from .store import Store
+from .status import with_status
+from . import video_queue
 
 
 def rpc(method, params):
     request = {'jsonrpc': '2.0', 'method': method, 'params': params,
                'id': 'playlist_resumer_music'}
-    return json.loads(xbmc.executeJSONRPC(json.dumps(request)))
+    return json.loads(timing.execute(json.dumps(request)))
 
 
 def checked_rpc(method, params):
@@ -75,6 +82,7 @@ def _get_playing_item(player):
     return current, player.getPlayingFile()
 
 
+@timing.span("music_resumer._wait_for_saved_song")
 def _wait_for_saved_song(player, saved_item, saved_file, monitor, seconds=4):
     """Allow Kodi's audio player to update after Player.Open/Player.GoTo."""
     deadline = time.monotonic() + seconds
@@ -91,6 +99,7 @@ def _wait_for_saved_song(player, saved_item, saved_file, monitor, seconds=4):
 
 
 
+@timing.span("music_resumer._paths_for_queue")
 def _paths_for_queue(snapshot, queue, monitor=None):
     """Resolve a saved queue to file URLs in one bulk library pass.
 
@@ -138,6 +147,7 @@ def _paths_for_queue(snapshot, queue, monitor=None):
     return paths
 
 
+@timing.span("music_resumer._load_native_queue")
 def _load_native_queue(paths):
     """Use Kodi's in-process playlist loader instead of per-song DB lookups."""
     playlist_file = os.path.join(
@@ -267,7 +277,9 @@ def capture(player, periodic=False):
         return False
 
 
-def restore(player, before_open=lambda: True):
+@timing.span("music_resumer.restore")
+@with_status
+def restore(player, before_open=lambda: True, *, status):
     """Restore a full music queue and start the saved song from the beginning."""
     if not Store.resume_on_startup or not has_snapshot() or player.isPlaying():
         return False
@@ -293,34 +305,31 @@ def restore(player, before_open=lambda: True):
     monitor = Store.kodi_event_monitor or xbmc.Monitor()
     if monitor.abortRequested() or player.isPlaying():
         return False
-    log('Restoring music playlist: %d tracks, position %d' % (len(queue), position),
+    log('Restoring music playlist: %d tracks, position %d' % (len(queue), position + 1),
         level=xbmc.LOGINFO)
     if not before_open():
         return False
-    notify("Preparing to resume music playback...", xbmcgui.NOTIFICATION_INFO, 4000)
+    status.update(0, "Resume Music", "Preparing to resume music playlist...")
     if not wait_preparing(monitor, before_open):
         return False
     queue_started = time.monotonic()
     player._restoring_music = True
     try:
+        status.update(0, "Resume Music", "Restoring %d tracks..." % len(queue))
+        video_queue.clear_playlist_first(monitor, playlistid=0)
         # Native loader processes a local M3U in Kodi's playlist engine.
         # JSON-RPC Playlist.Add with songid iterates a database GetSong per ID.
         paths = None
         try:
-            phase_start = time.monotonic()
+
             paths = _paths_for_queue(snapshot, queue, monitor=monitor)
             if monitor.abortRequested():
                 return False
-            log('Music timing: resolving paths took %.2fs' %
-                (time.monotonic() - phase_start), level=xbmc.LOGINFO)
             if paths is not None:
                 if monitor.abortRequested():
                     return False
-                phase_start = time.monotonic()
-                log('Music timing: native PlayList.load START', level=xbmc.LOGINFO)
-                loaded = _load_native_queue(paths)
-                log('Music timing: native PlayList.load END %d tracks in %.2fs' %
-                    (loaded, time.monotonic() - phase_start), level=xbmc.LOGINFO)
+
+                _load_native_queue(paths)
         except (OSError, RuntimeError, ValueError, TypeError) as error:
             log('Music native loader failed: %s; using legacy fallback' % error,
                 level=xbmc.LOGINFO)
@@ -330,15 +339,13 @@ def restore(player, before_open=lambda: True):
         if paths is None:
             # Preserve compatibility with older snapshots and non-library URLs.
             # This is slow because Kodi resolves each song ID in its DB.
-            phase_start = time.monotonic()
+
             checked_rpc('Playlist.Clear', {'playlistid': 0})
             for start in range(0, len(queue), 200):
                 if monitor.abortRequested():
                     return False
                 chunk = queue[start:start + 200]
-                log('Music timing: legacy Playlist.Add START %d-%d' %
-                    (start + 1, start + len(chunk)), level=xbmc.LOGINFO)
-                batch_start = time.monotonic()
+
                 try:
                     checked_rpc('Playlist.Add', {'playlistid': 0, 'item': chunk})
                 except (ValueError, TypeError) as error:
@@ -348,22 +355,16 @@ def restore(player, before_open=lambda: True):
                         if monitor.abortRequested():
                             return False
                         checked_rpc('Playlist.Add', {'playlistid': 0, 'item': item})
-                log('Music timing: legacy Playlist.Add END in %.2fs' %
-                    (time.monotonic() - batch_start), level=xbmc.LOGINFO)
                 if monitor.abortRequested():
                     return False
-            log('Music timing: legacy restore total %.2fs' %
-                (time.monotonic() - phase_start), level=xbmc.LOGINFO)
         if monitor.abortRequested():
             return False
-        phase_start = time.monotonic()
+
         props = checked_rpc('Playlist.GetProperties',
                             {'playlistid': 0, 'properties': ['size']})
-        log('Music timing: Playlist.GetProperties END in %.2fs' %
-            (time.monotonic() - phase_start), level=xbmc.LOGINFO)
         if props.get('size') != len(queue):
             log('Music restore: incomplete queue (%s/%s)' %
-                (props.get('size'), len(queue)))
+                (props.get('size'), len(queue)), level=xbmc.LOGWARNING)
             return False
         log('Music restore: queued %d tracks in %.2f seconds' %
             (len(queue), time.monotonic() - queue_started), level=xbmc.LOGINFO)
@@ -372,13 +373,10 @@ def restore(player, before_open=lambda: True):
             return False
         if not before_open():
             return False
-        notify('Resuming music playback...', xbmcgui.NOTIFICATION_INFO)
-        phase_start = time.monotonic()
-        log('Music timing: Player.Open START', level=xbmc.LOGINFO)
+        status.update(0, "Resume Music", "Starting saved track...")
+
         checked_rpc('Player.Open', {'item': {'playlistid': 0, 'position': position},
                                     'options': {'shuffled': False}})
-        log('Music timing: Player.Open END in %.2fs' %
-            (time.monotonic() - phase_start), level=xbmc.LOGINFO)
 
         # Wait up to 10 seconds for a real audio track, not just Player.Open OK.
         for _ in range(50):
@@ -419,12 +417,10 @@ def restore(player, before_open=lambda: True):
         if monitor.abortRequested():
             return False
         log('Music restore: starting saved song from beginning (no resume seek)', level=xbmc.LOGINFO)
-        log('Music timing: saved song verified, total %.2fs since loading started' %
-            (time.monotonic() - queue_started), level=xbmc.LOGINFO)
-        log('Music restore: playlist and track verified')
+        log('Music restore: playlist and track verified at position %d' % (position + 1), level=xbmc.LOGINFO)
         return True
     except (ValueError, TypeError, RuntimeError, OSError, KeyError) as error:
-        log('Music restore failed: %s' % error)
+        log('Music restore failed: %s' % error, level=xbmc.LOGWARNING)
         return False
     finally:
         player._restoring_music = False

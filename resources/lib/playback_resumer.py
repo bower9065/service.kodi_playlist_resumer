@@ -5,6 +5,7 @@ import time
 from .monitor import KodiEventMonitor
 from .player import KodiPlayer
 from . import library_cache
+from .profile_cleanup import clean_profile
 
 def run():
     """
@@ -14,6 +15,7 @@ def run():
     """
     idle_started = (time.monotonic(), xbmc.getGlobalIdleTime())
     footprints()
+    clean_profile(PROFILE)
     config = Store()
     Store.kodi_event_monitor = KodiEventMonitor()
     Store.kodi_player = KodiPlayer(xbmc.Player)
@@ -36,6 +38,15 @@ def run():
     while not Store.kodi_event_monitor.abortRequested():
         if Store.kodi_event_monitor.waitForAbort(1):
             break
+
+        try:
+            Store.kodi_player.process_pending_stop()
+        except Exception as error:
+            xbmc.log('###Kodi Playlist Resumer - ' + ("KPR STOP: classification failed: " + str(error)), xbmc.LOGWARNING)
+        try:
+            Store.kodi_player.capture_video_if_due()
+        except Exception as error:
+            xbmc.log('###Kodi Playlist Resumer - ' + ("KPR SAVE: video capture failed: " + str(error)), xbmc.LOGWARNING)
         if Store.kodi_player.isPlayingAudio():
             if time.monotonic() >= next_music_capture:
                 Store.kodi_player.capture_music_if_due()

@@ -264,3 +264,21 @@ msgstr "Manually refresh cached video library IDs and file paths without waiting
 msgctxt "#32225"
 msgid "Manually refresh cached smart-playlist memberships and exclusions without waiting for the cache to expire."
 msgstr "Manually refresh cached smart-playlist memberships and exclusions without waiting for the cache to expire."
+
+msgctxt "#32300"
+msgid "Native video playlist reads"
+msgstr "Native video playlist reads"
+
+msgctxt "#32301"
+msgid "Read library IDs directly from Kodi playlist items; fall back to JSON-RPC if unavailable."
+msgstr "Read library IDs directly from Kodi playlist items; fall back to JSON-RPC if unavailable."
+
+msgctxt "#32302"
+msgid "Benchmark playlist reads"
+msgstr "Benchmark playlist reads"
+
+msgctxt "#32303"
+msgid "Read using both methods and compare order and elapsed time. Enable temporarily; adds overhead. Requires native video playlist reads."
+msgstr "Read using both methods and compare order and elapsed time. Enable temporarily; adds overhead. Requires native video playlist reads."
+
+

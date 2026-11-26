@@ -18,6 +18,11 @@ https://github.com/bossanova808/repository.bossanova808/blob/main/latest-common/
 
 """
 
+if __package__:
+    from . import timing
+else:
+    import timing
+
 import sys
 import traceback
 
@@ -92,7 +97,7 @@ else:
         :param level: optional, the Kodi log level to use, default LOGDEBUG but can override with level=xbmc.LOGINFO
         """
 
-        message = f'### {ADDON_NAME} {ADDON_VERSION} - {message}'
+        message = f'###Kodi Playlist Resumer {ADDON_VERSION} - {message}'
         message_with_exception = message + f' ### Exception: {traceback.format_exc(exception_instance)}'
 
         if exception_instance is None:
@@ -149,7 +154,7 @@ else:
         :return the json object loaded from the result string
         """
         log(f'KODI JSON RPC command: {human_description} [{json_string}]')
-        result = xbmc.executeJSONRPC(json_string)
+        result = timing.execute(json_string)
         log(f'KODI JSON RPC result: {result}')
         return json.loads(result)
 
@@ -185,7 +190,7 @@ else:
         """
         dialog = xbmcgui.Dialog()
 
-        dialog.notification(ADDON_NAME,
+        dialog.notification("Playlist Resumer",
                             message,
                             notification_type,
                             duration)
@@ -216,6 +221,7 @@ def footprints(startup=True):
 
 
 
+@timing.span("common.wait_preparing")
 def wait_preparing(monitor, allowed):
     """Four-second interruptible notification window before preparation."""
     import time
